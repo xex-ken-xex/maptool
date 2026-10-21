@@ -234,7 +234,7 @@ body.maxed{overflow:hidden}
         <button type="button" id="exGrid">区画データを書き出す（平面世界の地図用）</button>
         <select id="exGridN" title="書き出す範囲（レベル4の区画の数）"><option value="8">8×8（4,194 km 角）</option><option value="10" selected>10×10（5,243 km 角）</option><option value="12">12×12（6,291 km 角）</option></select>
       </div>
-      <div class="note" id="exNote">標高データは今の表示範囲を、表示中の細かさで書き出します。世界の設定には、配線・シード・パラメータ・ランドマーク・メモが入ります。区画データは中心を原点に 2.048 km 格子で一度だけ計算し、標高・ランドマーク・世界の設定を 1 ファイル（.sfw）にまとめます。10×10 で 1 分ほどかかります。</div>
+      <div class="note" id="exNote">標高データは今の表示範囲を、表示中の細かさで書き出します。世界の設定には、配線・シード・パラメータ・ランドマーク・メモが入ります。区画データは中心を原点に 2.048 km 格子で一度だけ計算し、標高・ランドマーク・世界の設定を 1 ファイル（.zip の中の world.sfw）にまとめます。10×10 で 1 分ほどかかります。</div>
     </div>
     <div class="panel">
       <h2>高さの分布（表示範囲）</h2>
@@ -1550,10 +1550,26 @@ async function exportGrid(){
       pins:notes.pins.map(p=>({name:p.name||"",type:p.type||"mark",x:Math.round(p.x*1000),y:Math.round(-p.y*1000),note:p.note||""})),
       world:{format:"silverfall-world-v1",graph:G2,uid,litR,loopCount,view,pins:notes.pins,memo:notes.memo},created:new Date().toISOString()};
     const hj=new TextEncoder().encode(JSON.stringify(head)),hl=new Uint8Array(4);new DataView(hl.buffer).setUint32(0,hj.length,true);
-    await saveFile("silverfall-grid-"+stamp()+".sfw",new Blob([new TextEncoder().encode("SFW1"),hl,hj,out.buffer],{type:"application/octet-stream"}));
+    // one .zip (stored, no compression) holding world.sfw: the save dialog of the published page allows zip, not sfw
+    const sfw=new Blob([new TextEncoder().encode("SFW1"),hl,hj,out.buffer]);
+    await saveFile("silverfall-grid-"+stamp()+".zip",await zipStored([["world.sfw",new Uint8Array(await sfw.arrayBuffer())]]));
     note.textContent+="（"+n+"×"+n+" 升、"+Math.round((performance.now()-t0)/1000)+" 秒）";
   }catch(e){note.textContent="区画データを書き出せませんでした: "+(e&&(e.err||e.message)||e);}
   gridJob=false;btn.disabled=false;progEl.style.width="0";render();
+}
+const CRC_T=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++) c=CRC_T[(c^u8[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+async function zipStored(files){   // [[name, Uint8Array], ...] -> Blob of a zip with the entries stored as they are
+  const enc=new TextEncoder(),parts=[],central=[];let off=0;
+  const u32=v=>{const b=new Uint8Array(4);new DataView(b.buffer).setUint32(0,v>>>0,true);return b;},u16=v=>{const b=new Uint8Array(2);new DataView(b.buffer).setUint16(0,v,true);return b;};
+  const dt=new Date(),tm=(dt.getHours()<<11)|(dt.getMinutes()<<5)|(dt.getSeconds()>>1),dd=((dt.getFullYear()-1980)<<9)|((dt.getMonth()+1)<<5)|dt.getDate();
+  for(const [name,data] of files){const nm=enc.encode(name),crc=crc32(data);
+    const loc=[u32(0x04034b50),u16(20),u16(0x800),u16(0),u16(tm),u16(dd),u32(crc),u32(data.length),u32(data.length),u16(nm.length),u16(0),nm];
+    central.push([u32(0x02014b50),u16(20),u16(20),u16(0x800),u16(0),u16(tm),u16(dd),u32(crc),u32(data.length),u32(data.length),u16(nm.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(off),nm]);
+    for(const b of loc){parts.push(b);off+=b.length;}parts.push(data);off+=data.length;}
+  const cdStart=off;let cdLen=0;for(const c of central)for(const b of c){parts.push(b);cdLen+=b.length;}
+  parts.push(u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),u32(cdLen),u32(cdStart),u16(0));
+  return new Blob(parts,{type:"application/zip"});
 }
 document.getElementById("exGrid").onclick=exportGrid;
 document.getElementById("imWorld").addEventListener("change",ev=>{

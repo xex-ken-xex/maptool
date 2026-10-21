@@ -56,7 +56,7 @@ input[type=range]{width:90px}
   <label><input type="checkbox" id="lLit" checked>照らす円</label>
   <label><input type="checkbox" id="lHoly" checked>極と聖地</label>
   <button id="home">中心へ</button>
-  <label class="btnlike" title="地形工房の「区画データを書き出す」で作った .sfw">世界を読み込む<input type="file" id="worldFile" accept=".sfw" hidden></label>
+  <label class="btnlike" title="地形工房の「区画データを書き出す」で作った zip（中は world.sfw）">世界を読み込む<input type="file" id="worldFile" accept=".sfw,.zip" hidden></label>
   <button id="worldOff" hidden>仮の世界に戻す</button>
   <span class="hint">ドラッグで移動、ホイールで拡大、F2 でデバッグ表示</span>
 </header>
@@ -64,7 +64,7 @@ input[type=range]{width:90px}
   <canvas id="map"></canvas>
   <div id="hud"></div>
   <div id="dbg" hidden></div>
-  <div id="note">地形と地名は仮の生成（地形工房の .sfw をここへドロップ）</div>
+  <div id="note">地形と地名は仮の生成（地形工房の区画データ zip をここへドロップ）</div>
 </div>
 <script>
 "use strict";
@@ -619,14 +619,22 @@ function applyWorld(w,fname){
   WORLD=w;S.gen++;S.litR=w?w.litR:2200e3;
   const msg=w?{kind:"world",world:{n:w.n,C:w.C,X0:w.X0,Y0:w.Y0,buf:w.G.buffer}}:{kind:"world",world:null};
   for(const wk of pool) wk.postMessage(msg);hydroW.postMessage(msg);
-  $("worldOff").hidden=!w;$("note").textContent=w?"地形工房の世界: "+(w.name||"")+"  "+w.n+"×"+w.n+" 升  ランドマーク "+w.pins.length:"地形と地名は仮の生成（地形工房の .sfw をここへドロップ）";
+  $("worldOff").hidden=!w;$("note").textContent=w?"地形工房の世界: "+(w.name||"")+"  "+w.n+"×"+w.n+" 升  ランドマーク "+w.pins.length:"地形と地名は仮の生成（地形工房の区画データ zip をここへドロップ）";
   resetTiles();
 }
 function idb(){return new Promise((res,rej)=>{const r=indexedDB.open("sf-flatmap",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
 async function idbPut(k,v){try{const d=await idb();await new Promise((res,rej)=>{const t=d.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=res;t.onerror=()=>rej(t.error);});}catch(e){}}
 async function idbGet(k){try{const d=await idb();return await new Promise((res,rej)=>{const r=d.transaction("kv").objectStore("kv").get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}catch(e){return null;}}
+async function unzipFirst(buf){   // the .sfw inside a zip from 地形工房 (stored or deflated); null when buf is not a zip
+  const u8=new Uint8Array(buf),dv=new DataView(buf);if(u8.length<30||dv.getUint32(0,true)!==0x04034b50) return null;
+  const method=dv.getUint16(8,true),csize=dv.getUint32(18,true),nl=dv.getUint16(26,true),xl=dv.getUint16(28,true),start=30+nl+xl;
+  const data=u8.subarray(start,start+csize);
+  if(method===0) return data.slice().buffer;
+  if(method===8&&typeof DecompressionStream!=="undefined") return await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
+  throw new Error("この zip の圧縮方式は読めません");
+}
 async function loadWorldFile(f){
-  try{const buf=await f.arrayBuffer(),w=parseSfw(buf,f.name);applyWorld(w,f.name);idbPut("world",{buf,name:f.name});}
+  try{let buf=await f.arrayBuffer();const z=await unzipFirst(buf);if(z) buf=z;const w=parseSfw(buf,f.name);applyWorld(w,f.name);idbPut("world",{buf,name:f.name});}
   catch(e){$("note").textContent="読み込めませんでした: "+e.message;}
 }
 $("worldFile").onchange=ev=>{const f=ev.target.files[0];if(f) loadWorldFile(f);ev.target.value="";};
