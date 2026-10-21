@@ -1,0 +1,1434 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Silver Fall 地形工房</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: chart table on the left, instruments on the right, the node bench underneath. One parchment world, single theme by choice. */
+:root{
+  --paper:#efe5cf; --paper-2:#e6d8bb; --paper-3:#d9c7a3;
+  --ink:#3d2b1c; --ink-2:#6b5440; --ink-3:#9a8166;
+  --sea:#7d9496; --rust:#a4472b; --blue:#3f6b7a;
+  --display:"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif;
+  --body:"BIZ UDPGothic","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+html,body{background:var(--paper);color:var(--ink)}
+body{font-family:var(--body);font-size:14px;line-height:1.6;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+h1,h2,h3{font-family:var(--display);font-weight:800;margin:0;text-wrap:balance;letter-spacing:.02em}
+h1{font-size:28px}
+h2{font-size:18px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:1.5px solid var(--ink);padding-bottom:10px}
+header p{margin:2px 0 0;color:var(--ink-2);max-width:62ch}
+.lbl{font-size:11px;letter-spacing:.12em;color:var(--ink-3);text-transform:uppercase;font-family:var(--mono)}
+button,select,input,textarea{font:inherit;color:var(--ink)}
+button{background:var(--paper-2);border:1px solid var(--ink-2);border-radius:3px;padding:4px 10px;cursor:pointer}
+button:hover{background:var(--paper-3)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--rust);outline-offset:1px}
+button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+button.primary:hover{background:var(--ink-2)}
+button.danger{color:var(--rust);border-color:var(--rust)}
+input[type=number],input[type=text],select,textarea{background:#f6efdf;border:1px solid var(--ink-3);border-radius:3px;padding:3px 6px}
+.top{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+@media (max-width:860px){.top{grid-template-columns:minmax(0,1fr)}}
+.mapbox{position:relative;width:100%;max-width:720px;aspect-ratio:1;border:1.5px solid var(--ink);background:var(--paper-2);overflow:hidden;touch-action:none;cursor:grab}
+.mapbox canvas{position:absolute;inset:0;width:100%;height:100%;image-rendering:auto}
+.mapbox.drag{cursor:grabbing}
+.mapctl{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:4px;z-index:3}
+.mapctl button{width:32px;height:32px;padding:0;background:rgba(239,229,207,.9)}
+.prog{position:absolute;left:0;bottom:0;height:3px;background:var(--rust);width:0;z-index:3;transition:width .1s}
+.status{position:absolute;left:8px;top:8px;z-index:3;background:rgba(239,229,207,.88);border:1px solid var(--ink-3);padding:2px 8px;font-size:12px;max-width:70%}
+.status.err{color:var(--rust);border-color:var(--rust)}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.panel{border-top:1px solid var(--ink-3);padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-variant-numeric:tabular-nums}
+.kv dt{color:var(--ink-2)}
+.kv dd{margin:0;font-family:var(--mono);font-size:13px;text-align:right}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}
+.checks label{display:flex;gap:6px;align-items:center}
+.field{display:flex;flex-direction:column;gap:2px}
+.field input[type=range]{width:100%;accent-color:var(--ink)}
+.field .fh{display:flex;justify-content:space-between;gap:8px}
+.field .fh span:last-child{font-family:var(--mono);font-size:12px}
+#hyp{width:100%;height:110px;display:block}
+/* node bench */
+.benchhead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.bench{position:relative;border:1.5px solid var(--ink);background:
+  repeating-linear-gradient(0deg,transparent 0 23px,rgba(61,43,28,.06) 23px 24px),
+  repeating-linear-gradient(90deg,transparent 0 23px,rgba(61,43,28,.06) 23px 24px),var(--paper-2);
+  height:440px;overflow:auto}
+.board{position:relative;width:1500px;height:620px}
+.board svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.board svg path{fill:none;stroke:var(--ink-2);stroke-width:2}
+.board svg path.temp{stroke:var(--rust);stroke-dasharray:5 4}
+.node{position:absolute;width:184px;background:var(--paper);border:1.5px solid var(--ink);border-radius:4px;box-shadow:2px 2px 0 rgba(61,43,28,.25);font-size:12.5px;user-select:none}
+.node.sel{border-color:var(--rust);box-shadow:3px 3px 0 rgba(164,71,43,.35)}
+.node.bad{background:#f3dccf}
+.node .nh{display:flex;justify-content:space-between;align-items:baseline;gap:6px;padding:4px 8px;border-bottom:1px solid var(--ink-3);cursor:move;font-family:var(--display);font-weight:800;font-size:13.5px}
+.node .nh .sd{font-family:var(--mono);font-weight:400;font-size:10.5px;color:var(--ink-3);white-space:nowrap}
+.node .order{font-family:var(--mono);font-size:10.5px;color:var(--rust);margin-right:4px}
+.node .ports{display:grid;grid-template-columns:1fr 1fr;padding:4px 0}
+.node .pin,.node .pout{display:flex;align-items:center;gap:5px;height:20px;position:relative}
+.node .pin{padding-left:10px}
+.node .pout{justify-content:flex-end;padding-right:10px}
+.dot{width:11px;height:11px;border-radius:50%;border:1.5px solid var(--ink);background:var(--paper);position:absolute;cursor:crosshair}
+.pin .dot{left:-6.5px}
+.pout .dot{right:-6.5px}
+.dot.on{background:var(--ink)}
+.eye{border:none;background:none;padding:0 2px;font-size:11px;color:var(--ink-3);cursor:pointer;line-height:1}
+.eye.on{color:var(--rust)}
+.inspector{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.inspector{grid-template-columns:minmax(0,1fr)}}
+.inspector textarea{width:100%;min-height:300px;font-family:var(--mono);font-size:12px;line-height:1.5;tab-size:2;white-space:pre;overflow:auto;box-sizing:border-box}
+.note{color:var(--ink-2);font-size:12.5px;max-width:70ch}
+.err{color:var(--rust)}
+details summary{cursor:pointer;font-family:var(--display);font-weight:800}
+.howto{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.howto p{margin:4px 0 0;color:var(--ink-2)}
+.mapbox.max{position:fixed;inset:0;z-index:50;max-width:none;aspect-ratio:auto;width:auto;height:auto;border:none;
+  margin:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+body.maxed{overflow:hidden}
+.pinbar{position:absolute;left:8px;top:40px;z-index:3;display:flex;flex-wrap:wrap;gap:3px;max-width:calc(100% - 60px)}
+.pinbar button{background:rgba(239,229,207,.92);padding:2px 8px;font-size:12px}
+.pinbar button.on{background:var(--ink);color:var(--paper)}
+.mapbox.placing{cursor:crosshair}
+.drawer{position:absolute;right:48px;top:8px;z-index:4;width:min(320px,calc(100% - 64px));background:var(--paper);border:1.5px solid var(--ink);box-shadow:3px 3px 0 rgba(61,43,28,.25);padding:8px 10px;display:flex;flex-direction:column;gap:6px;cursor:auto}
+.drawer .dh{display:flex;justify-content:space-between;align-items:center;font-family:var(--display)}
+.drawer .dh button{padding:0 8px}
+.drawer textarea{width:100%;box-sizing:border-box;font-family:var(--body);font-size:13px;line-height:1.6}
+#worldMemo{min-height:220px}
+.drawer.pined{top:auto;bottom:40px;right:auto;left:8px}
+[hidden]{display:none!important}
+.pinlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;max-height:220px;overflow:auto}
+.pinlist li{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.pinlist button{border:none;background:none;padding:0;text-align:left;cursor:pointer;color:var(--ink);text-decoration:underline;text-decoration-color:var(--ink-3);text-underline-offset:3px}
+.pinlist .k{font-size:11px;color:var(--ink-3);font-family:var(--mono);white-space:nowrap}
+.exp{display:grid;grid-template-columns:1fr;gap:6px}
+.exp button,.btnlike{text-align:left}
+.btnlike{background:var(--paper-2);border:1px solid var(--ink-2);border-radius:3px;padding:4px 10px;cursor:pointer}
+.btnlike:hover{background:var(--paper-3)}
+@media (prefers-reduced-motion:reduce){.prog{transition:none}}
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <div class="lbl">Silver Fall · 地形生成の試作</div>
+    <h1>地形工房</h1>
+    <p>ノードをつないで陸と海底の高さを作ります。各ノードは自分のシードを持ち、同じシードなら地図のどこをどの順で見ても同じ地形になります。地図はドラッグで移動、ホイールか右上のボタンで拡大縮小、⤢で最大化、✎でメモ。左上から都市や城などのランドマークを打てます。</p>
+  </div>
+  <div class="row">
+    <button id="rollAll" type="button">全ノードのシードを振る</button>
+    <button id="resetGraph" type="button" class="danger">初期の配線に戻す</button>
+  </div>
+</header>
+
+<div class="top">
+  <div class="mapbox" id="mapbox">
+    <canvas id="map"></canvas>
+    <canvas id="ovl"></canvas>
+    <div class="status" id="status">準備中</div>
+    <div class="mapctl">
+      <button id="zin" type="button" aria-label="拡大" title="拡大">＋</button>
+      <button id="zout" type="button" aria-label="縮小" title="縮小">－</button>
+      <button id="home" type="button" aria-label="中心へ戻る" title="中心へ戻る">◎</button>
+      <button id="maxBtn" type="button" aria-label="地図を最大化" title="地図を最大化（Escで戻る）">⤢</button>
+      <button id="memoBtn" type="button" aria-label="メモ" title="メモ">✎</button>
+    </div>
+    <div class="pinbar" id="pinbar" role="toolbar" aria-label="ランドマークを打つ">
+      <button type="button" data-mode="" class="on" title="地図を動かす">動かす</button>
+      <button type="button" data-mode="city">都市</button>
+      <button type="button" data-mode="port">港</button>
+      <button type="button" data-mode="castle">城</button>
+      <button type="button" data-mode="tower">塔</button>
+      <button type="button" data-mode="ruin">遺跡</button>
+      <button type="button" data-mode="mark">目印</button>
+    </div>
+    <div class="drawer" id="memoDrawer" hidden>
+      <div class="dh"><strong>世界のメモ</strong><button type="button" id="memoClose" aria-label="閉じる">×</button></div>
+      <textarea id="worldMemo" placeholder="この世界について気づいたこと、決めたことを書いておけます。"></textarea>
+    </div>
+    <div class="drawer pined" id="pinEditor" hidden>
+      <div class="dh"><strong id="peTitle">ランドマーク</strong><button type="button" id="peClose" aria-label="閉じる">×</button></div>
+      <div class="field"><label for="peName">名前</label><input type="text" id="peName"></div>
+      <div class="field"><label for="peType">種類</label><select id="peType"></select></div>
+      <div class="field"><label for="peNote">メモ</label><textarea id="peNote" rows="3"></textarea></div>
+      <div class="note" id="pePos"></div>
+      <div class="row"><button type="button" class="primary" id="peSave">保存</button><button type="button" class="danger" id="peDel">削除</button></div>
+    </div>
+    <div class="prog" id="prog"></div>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h2>カーソルの地点</h2>
+      <dl class="kv" id="probe">
+        <dt>標高・水深</dt><dd>—</dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h2>表示</h2>
+      <div class="checks">
+        <label><input type="checkbox" id="lLit" checked>神々の照らす円</label>
+        <label><input type="checkbox" id="lFog" checked>辺境の霞</label>
+        <label><input type="checkbox" id="lContour" checked>等高線・等深線</label>
+        <label><input type="checkbox" id="lShade" checked>陰影</label>
+        <label><input type="checkbox" id="lPlate">プレート境界</label>
+        <label><input type="checkbox" id="lWind" checked>風の帯</label>
+        <label><input type="checkbox" id="lGrid">経緯の円</label>
+        <label><input type="checkbox" id="lPins" checked>ランドマーク</label>
+        <label><input type="checkbox" id="lRiver" checked>川</label>
+      </div>
+      <div class="field" id="litField">
+        <div class="fh"><label for="litR">神々の照らす円の半径</label><span id="litRv"></span></div>
+        <input type="range" id="litR" min="500" max="20000" step="100" value="2200">
+      </div>
+      <div class="row"><span class="note" id="previewNote"></span></div>
+    </div>
+    <div class="panel">
+      <h2>ランドマーク</h2>
+      <div class="note">地図の左上で種類を選んで地図をクリックすると打てます。名前をクリックするとその場所へ飛びます。</div>
+      <ul class="pinlist" id="pinList"></ul>
+    </div>
+    <div class="panel">
+      <h2>出力</h2>
+      <div class="exp">
+        <button type="button" id="exPng">地図の画像（PNG）</button>
+        <button type="button" id="exSvg">地図の線画（SVG）</button>
+        <button type="button" id="exCsv">標高データ（CSV）</button>
+        <button type="button" id="exJson">標高データ（JSON）</button>
+        <button type="button" id="exWorld">世界の設定を保存（JSON）</button>
+        <label class="btnlike" for="imWorld">世界の設定を読み込む</label>
+        <input type="file" id="imWorld" accept=".json,application/json" hidden>
+      </div>
+      <div class="note" id="exNote">標高データは今の表示範囲を、表示中の細かさで書き出します。世界の設定には、配線・シード・パラメータ・ランドマーク・メモが入ります。</div>
+    </div>
+    <div class="panel">
+      <h2>高さの分布（表示範囲）</h2>
+      <canvas id="hyp"></canvas>
+      <div class="note" id="hypNote">地球は「陸の高台」と「深い海底」の二つの山になります。</div>
+    </div>
+  </div>
+</div>
+
+
+<section class="panel" style="border-top:1.5px solid var(--ink)">
+  <div class="benchhead">
+    <div>
+      <h2>ノード</h2>
+      <div class="note">見出しをドラッグで移動。右の丸から左の丸へドラッグでつなぐ。左の丸をクリックで線を外す。出力の「見る」で途中結果を地図に映す。番号は実行順。</div>
+    </div>
+    <div class="row">
+      <button id="arrange" type="button">列に整列</button>
+      <label for="loopN" class="lbl">循環の回数</label>
+      <input type="number" id="loopN" min="1" max="30" value="4" style="width:60px">
+      <label for="addType" class="lbl">追加</label>
+      <select id="addType"></select>
+      <button id="addNode" type="button" class="primary">ノードを追加</button>
+    </div>
+  </div>
+  <div class="bench" id="bench"><div class="board" id="board"><svg id="wires"></svg></div></div>
+</section>
+
+<section class="panel" id="insp">
+  <h2 id="inspTitle">ノードを選ぶと、ここで中身を編集できます</h2>
+  <div class="inspector" id="inspBody" hidden>
+    <div class="side">
+      <div class="field"><label for="iName">名前</label><input type="text" id="iName"></div>
+      <div class="field">
+        <label for="iSeed">シード</label>
+        <div class="row"><input type="number" id="iSeed" style="width:130px"><button type="button" id="iDice">振る</button></div>
+      </div>
+      <div id="iParams" class="side"></div>
+      <div class="field"><label for="iIn">入力（カンマ区切り）</label><input type="text" id="iIn"></div>
+      <div class="field"><label for="iOut">出力（カンマ区切り）</label><input type="text" id="iOut"></div>
+      <div class="row">
+        <button type="button" class="primary" id="iApply">反映して描き直す</button>
+        <button type="button" class="danger" id="iDel">このノードを削除</button>
+      </div>
+      <div class="note err" id="iErr"></div>
+    </div>
+    <div class="field" style="min-width:0">
+      <label for="iCode">処理（1地点ごとに呼ばれる関数。x, y は km、inp は入力、p はパラメータ、seed はこのノードのシード、lib は道具箱）</label>
+      <textarea id="iCode" spellcheck="false"></textarea>
+      <div class="note">lib の道具: noise(x,y,s) / fbm(x,y,s,octaves,gain) / ridged(x,y,s,octaves) / rnd(i,j,s) 0〜1 / smooth(a,b,v) / clamp(v,a,b) / octFor(基準km) 拡大率に合わせた重ね数。返り値は出力名をキーにした数値のオブジェクト。</div>
+    </div>
+  </div>
+</section>
+
+<details class="panel">
+  <summary>初期の配線がしていること</summary>
+  <div class="howto">
+    <div><h3>1 プレート</h3><p>平面を大きな升目に分け、升目ごとにシードで種を置いて区切ります。大陸か海洋か、動く向きもシードで決めます。外側へいくら広げても、その場所だけで計算できます。</p></div>
+    <div><h3>2 大陸の形</h3><p>大陸プレートを底上げしたうえに重ね合わせノイズを足します。「海岸線の次元D」は、ブリテン西岸が1.25、南アフリカが1.02（Richardson）。</p></div>
+    <div><h3>3 プレート境界</h3><p>ぶつかる大陸同士は山脈、海洋が大陸の下に沈む所は海溝と海岸山脈、海洋同士は海溝と弧状列島、離れる海洋は中央海嶺、離れる大陸は地溝。</p></div>
+    <div><h3>4 断面</h3><p>陸の縁から、大陸棚（縁の水深約140m）、大陸斜面（平均約4度）、深海平原（約4,000m）の順に落とします。</p></div>
+    <div><h3>5〜7 仕上げ</h3><p>境界の起伏を足し、山脈の尾根、海山と火山島、細かな起伏を重ねます。順番を入れ替えると結果が変わります。</p></div>
+    <div><h3>まだ無いもの</h3><p>川による侵食、波による海岸の侵食、砂浜や干潟。区画だけで計算できる形でノードとして足していく予定です。</p></div>
+  </div>
+</details>
+</div>
+
+<script>
+(()=>{
+"use strict";
+const SRC=document.currentScript?document.currentScript.textContent:"";
+/*CORE1*/
+/* ---------- toolbox ---------- */
+const G=[[1,0],[-1,0],[0,1],[0,-1],[.7071,.7071],[-.7071,.7071],[.7071,-.7071],[-.7071,-.7071]];
+function ih(ix,iy,s){let h=Math.imul(ix|0,0x27d4eb2d)^Math.imul(iy|0,0x165667b1)^Math.imul(s|0,0x9e3779b1);h=Math.imul(h^(h>>>15),0x85ebca6b);h=Math.imul(h^(h>>>13),0xc2b2ae35);return (h^(h>>>16))>>>0;}
+function rnd(i,j,s){return ih(i,j,s)/4294967296;}
+function noise(x,y,s){const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy;
+  const u=fx*fx*fx*(fx*(fx*6-15)+10),v=fy*fy*fy*(fy*(fy*6-15)+10);
+  const g00=G[ih(ix,iy,s)&7],g10=G[ih(ix+1,iy,s)&7],g01=G[ih(ix,iy+1,s)&7],g11=G[ih(ix+1,iy+1,s)&7];
+  const n00=g00[0]*fx+g00[1]*fy,n10=g10[0]*(fx-1)+g10[1]*fy,n01=g01[0]*fx+g01[1]*(fy-1),n11=g11[0]*(fx-1)+g11[1]*(fy-1);
+  const a=n00+(n10-n00)*u,b=n01+(n11-n01)*u;return (a+(b-a)*v)*1.6;}
+function fbm(x,y,s,oct,gain){let sum=0,amp=1,f=1;for(let i=0;i<oct;i++){sum+=amp*noise(x*f+i*17.31,y*f-i*9.17,s+i*101);amp*=gain;f*=2;}return sum*0.6;}
+function ridged(x,y,s,oct){let sum=0,amp=1,f=1,norm=0;for(let i=0;i<oct;i++){const n=1-Math.abs(noise(x*f+i*7.7,y*f+i*3.1,s+i*131));sum+=amp*n*n;norm+=amp;amp*=.5;f*=2;}return sum/norm;}
+function smooth(a,b,v){let t=(v-a)/(b-a);t=t<0?0:t>1?1:t;return t*t*(3-2*t);}
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+const lib={noise,fbm,ridged,rnd,smooth,clamp,pxKm:10,litR:2200,octFor(base){return clamp(Math.ceil(Math.log2(base/(lib.pxKm*1.5))),2,14);}};
+
+/* ---------- node types: real functions, shown as editable text ---------- */
+const TYPES={
+plates:{name:"プレート",ins:[],outs:["bias","bd","closing","cont","other","upper","id"],
+ params:[{k:"plateKm",l:"プレートの大きさ km",min:200,max:5000,step:50,v:950},{k:"contFrac",l:"大陸プレートの割合",min:.05,max:.9,step:.01,v:.38},{k:"warp",l:"境界のゆがみ",min:0,max:.9,step:.01,v:.45},{k:"lift",l:"大陸の底上げ",min:0,max:.6,step:.01,v:.22}],
+ fn:function(x,y,inp,p,seed,lib){
+  const ps=p.plateKm;
+  let qx=x/ps,qy=y/ps;
+  const wx=lib.fbm(qx*1.1,qy*1.1,seed+1,3,.5)*p.warp, wy=lib.fbm(qx*1.1+5.2,qy*1.1+1.3,seed+2,3,.5)*p.warp;
+  qx+=wx;qy+=wy;
+  const cx=Math.floor(qx),cy=Math.floor(qy),S=[];
+  let d1=1e9,a=0;
+  for(let j=cy-2;j<=cy+2;j++)for(let i=cx-2;i<=cx+2;i++){
+    const px=i+.1+.8*lib.rnd(i,j,seed+11),py=j+.1+.8*lib.rnd(i,j,seed+12),d=(px-qx)*(px-qx)+(py-qy)*(py-qy);
+    S.push([i,j,px,py,d]);if(d<d1){d1=d;a=S.length-1;}
+  }
+  const plate=(i,j)=>({cont:lib.rnd(i,j,seed+3)<p.contFrac,a:lib.rnd(i,j,seed+4)*6.2832,v:.3+.7*lib.rnd(i,j,seed+5),r:lib.rnd(i,j,seed+7)});
+  const [i1,j1,ax,ay]=S[a],A=plate(i1,j1);
+  // 自分のプレートの縁までの距離は、隣の各プレートとの境界線までの距離の最小。
+  // 隣が複数あるときは近い境界ほど重くして混ぜる（一番近い隣だけを見ると、隣が切り替わる線で段差ができる）
+  let bd=1e9;const B=[];
+  for(let k=0;k<S.length;k++){if(k===a)continue;const [i,j,bx,by,d]=S[k];
+    let nx=bx-ax,ny=by-ay;const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
+    const dk=(d-d1)/(2*nl)*ps;          // km to this neighbour's boundary
+    B.push([dk,nx,ny,i,j]);if(dk<bd)bd=dk;}
+  let ws=0,closing=0,other=0,upper=0,b2=0;
+  for(const [dk,nx,ny,i,j] of B){if(dk-bd>550)continue;const w=Math.exp(-(dk-bd)/60);const P=plate(i,j);ws+=w;
+    closing+=w*((Math.cos(A.a)*A.v-Math.cos(P.a)*P.v)*nx+(Math.sin(A.a)*A.v-Math.sin(P.a)*P.v)*ny)/2;
+    other+=w*(P.cont?1:0);upper+=w*(A.r>P.r?1:0);b2+=w*(P.cont?p.lift:-p.lift);}
+  closing/=ws;other/=ws;upper/=ws;b2/=ws;
+  const b1=A.cont?p.lift:-p.lift;
+  const t=.5+.5*lib.smooth(0,1,bd/400);
+  return {bias:b2+(b1-b2)*t,bd:bd,closing:closing,cont:A.cont?1:0,other:other,upper:upper,id:i1*7919+j1*104729};
+ }},
+mega:{name:"巨大大陸",ins:[],outs:["mega"],
+ params:[{k:"sizeKm",l:"大陸の半径 km",min:300,max:12000,step:50,v:1400},{k:"prob",l:"出る確率（升目ごと）",min:0,max:1,step:.01,v:.45},{k:"strength",l:"持ち上げる強さ",min:0,max:1.2,step:.01,v:.55},{k:"rough",l:"輪郭のゆがみ",min:0,max:1,step:.01,v:.45},{k:"center",l:"中心に必ず置く（0か1）",min:0,max:1,step:1,v:1}],
+ fn:function(x,y,inp,p,seed,lib){
+  // 半径の2.2倍の升目ごとに、シードで大陸の芯を置くかどうかを決める
+  const c=p.sizeKm*2.2,ci=Math.floor(x/c),cj=Math.floor(y/c);
+  const warp=p.rough*lib.fbm(x/(p.sizeKm*.55),y/(p.sizeKm*.55),seed+9,lib.octFor(p.sizeKm*.55),.55);
+  let best=0;
+  for(let j=cj-1;j<=cj+1;j++)for(let i=ci-1;i<=ci+1;i++){
+    const home=p.center>=.5&&i===0&&j===0;
+    if(!home&&lib.rnd(i,j,seed)>p.prob) continue;
+    const mx=home?0:(i+.2+.6*lib.rnd(i,j,seed+1))*c, my=home?0:(j+.2+.6*lib.rnd(i,j,seed+2))*c;
+    const r=p.sizeKm*(home?1:.6+.6*lib.rnd(i,j,seed+3));
+    const d=Math.hypot(x-mx,y-my)/r+warp;
+    best=Math.max(best,1-lib.smooth(.55,1.15,d));
+  }
+  return {mega:p.strength*best};
+ }},
+shape:{name:"大陸の形",ins:["bias","mega"],outs:["s"],
+ params:[{k:"coastD",l:"海岸線の次元D",min:1.02,max:1.5,step:.01,v:1.25},{k:"scaleKm",l:"大陸の大きさ km",min:200,max:5000,step:50,v:850},{k:"sea",l:"海面の高さ",min:-.4,max:.8,step:.01,v:.2}],
+ fn:function(x,y,inp,p,seed,lib){
+  const gain=Math.pow(2,-(2-p.coastD));        // 等値線の次元 D = 2 − H
+  const o=lib.octFor(p.scaleKm);
+  return {s:lib.fbm(x/p.scaleKm,y/p.scaleKm,seed,o,gain)*.55+inp.bias+inp.mega-p.sea};
+ }},
+boundary:{name:"プレート境界",ins:["s","bd","closing","cont","other","upper"],outs:["s","add","mtn"],
+ params:[{k:"trench",l:"海溝の深さ m",min:0,max:6000,step:100,v:3500},{k:"ridge",l:"海嶺の高さ m",min:0,max:4000,step:100,v:2200},{k:"arc",l:"弧状列島の高さ m",min:0,max:6000,step:100,v:4300},{k:"rift",l:"地溝の強さ",min:0,max:.6,step:.01,v:.2}],
+ fn:function(x,y,inp,p,seed,lib){
+  const bd=inp.bd,conv=Math.max(0,inp.closing),div=Math.max(0,-inp.closing);
+  const g=(c,w,X=bd)=>Math.exp(-((X-c)/w)*((X-c)/w));
+  // other（相手が大陸の割合）と upper（自分が上になる割合）は 0〜1。境界の種類ごとの効果を割合で混ぜる。
+  // 片側の効果は「大陸側から測った距離 X」「沈む側から測った距離 Y」の関数で書き、境界の両側で同じ式を使う（境界で段差を作らない）
+  const o=inp.other,u=inp.upper,noi=.55+.45*lib.noise(x/60,y/60,seed);let s=inp.s,add=0,mtn=0;
+  const contOcean=X=>{s+=w*(.2*conv*g(100,250,X)-p.rift*.5*div*g(0,120,X));mtn+=w*.8*conv*g(150,180,X);add-=w*p.trench*conv*g(-50,45,X);};
+  const oceanOcean=Y=>{add+=w*(p.arc*conv*g(-130,35,Y)*noi-p.trench*conv*g(40,40,Y)+p.ridge*div*g(0,350,Y)-500*div*g(0,12,Y));};
+  let w;
+  if(inp.cont){
+    w=o;s+=w*(.25*conv*g(0,350)-p.rift*div*g(0,150));mtn+=w*conv*g(0,350);   // 大陸と大陸
+    w=1-o;contOcean(bd);                                                     // 自分が大陸、相手が海洋
+  }else{
+    w=o;contOcean(-bd);                                                      // 自分が海洋、相手が大陸（沈み込む側）
+    w=(1-o)*(1-u);oceanOcean(bd);w=(1-o)*u;oceanOcean(-bd);                  // 海洋と海洋（u=1 なら自分が上）
+  }
+  return {s:s,add:add,mtn:mtn};
+ }},
+profile:{name:"断面（大陸棚→斜面→深海）",ins:["s"],outs:["e"],
+ params:[{k:"shelfKm",l:"大陸棚の幅 km",min:5,max:400,step:5,v:80},{k:"shelfEdge",l:"大陸棚の縁の水深 m",min:50,max:400,step:10,v:140},{k:"abyss",l:"深海平原の水深 m",min:2000,max:7000,step:100,v:4000},{k:"landH",l:"内陸の高台 m",min:100,max:3000,step:50,v:900}],
+ fn:function(x,y,inp,p,seed,lib){
+  const s=inp.s,sb=p.shelfKm*.00055,sl=.03;
+  let e;
+  // 陸と海は 0m で、同じ傾きでつながる（段差や傾きの差があると、拡大したとき海岸に崖や平らな帯ができる）
+  if(s>=0) e=p.shelfEdge/sb*s*Math.exp(-s/.02)+p.landH*.65*lib.smooth(0,.25,s)+p.landH*.35*lib.smooth(.15,.6,s);
+  else if(s>=-sb) e=-p.shelfEdge*(-s/sb);
+  else if(s>=-sb-sl) e=-p.shelfEdge-(p.abyss-p.shelfEdge)*lib.smooth(0,1,(-s-sb)/sl);
+  else e=-p.abyss-600*lib.smooth(0,.3,-s-sb-sl);
+  return {e:e};
+ }},
+add:{name:"足し算",ins:["a","b"],outs:["e"],params:[{k:"k",l:"b の倍率",min:0,max:2,step:.05,v:1}],
+ fn:function(x,y,inp,p,seed,lib){ return {e:inp.a+inp.b*p.k}; }},
+mountains:{name:"山脈の尾根",ins:["e","mtn"],outs:["e"],
+ params:[{k:"height",l:"山の高さ m",min:0,max:8000,step:100,v:3600},{k:"scaleKm",l:"尾根の間隔 km",min:50,max:2000,step:10,v:260}],
+ fn:function(x,y,inp,p,seed,lib){
+  if(inp.mtn<.01) return {e:inp.e};
+  const r=lib.ridged(x/p.scaleKm,y/p.scaleKm,seed,lib.octFor(p.scaleKm));
+  return {e:inp.e+p.height*inp.mtn*(.35+.65*r)};
+ }},
+seamounts:{name:"海山と火山島",ins:["e"],outs:["e"],
+ params:[{k:"cellKm",l:"間隔 km",min:80,max:1200,step:10,v:220},{k:"prob",l:"出る確率",min:0,max:1,step:.01,v:.3},{k:"maxH",l:"最大の高さ m",min:500,max:7000,step:100,v:5000}],
+ fn:function(x,y,inp,p,seed,lib){
+  const e=inp.e; if(e>-1500) return {e:e};
+  const c=p.cellKm,ci=Math.floor(x/c),cj=Math.floor(y/c);let add=0;
+  for(let j=cj-1;j<=cj+1;j++)for(let i=ci-1;i<=ci+1;i++){
+    if(lib.rnd(i,j,seed)>p.prob) continue;
+    const mx=(i+lib.rnd(i,j,seed+1))*c,my=(j+lib.rnd(i,j,seed+2))*c;
+    const r=12+40*lib.rnd(i,j,seed+3),h=p.maxH*(.3+.7*lib.rnd(i,j,seed+4));
+    const d2=((x-mx)*(x-mx)+(y-my)*(y-my))/(r*r);
+    if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));
+  }
+  return {e:e+add*lib.smooth(-1500,-3000,e)};
+ }},
+detail:{name:"細かな起伏",ins:["e","s"],outs:["e"],
+ params:[{k:"landAmp",l:"陸の起伏 m",min:0,max:1500,step:10,v:320},{k:"seaAmp",l:"海底の起伏 m",min:0,max:500,step:5,v:70},{k:"scaleKm",l:"起伏の大きさ km",min:10,max:1000,step:10,v:150}],
+ fn:function(x,y,inp,p,seed,lib){
+  const n=lib.fbm(x/p.scaleKm,y/p.scaleKm,seed,lib.octFor(p.scaleKm),.5);
+  const land=lib.smooth(0,.12,inp.s);
+  return {e:inp.e+n*(p.seaAmp+(p.landAmp-p.seaAmp)*land)*(inp.e>0||land>0?1:1)};
+ }},
+ice:{name:"氷床（循環の例）",ins:["surface"],outs:["ice"],
+ params:[{k:"snow",l:"中心の雪線 m",min:500,max:6000,step:50,v:2600},{k:"maxIce",l:"氷の最大の厚さ m",min:0,max:4000,step:50,v:2200}],
+ fn:function(x,y,inp,p,seed,lib){
+  // 辺境ほど雪線が下がる。地表が雪線より高いほど氷が厚い
+  const r=Math.hypot(x,y),line=p.snow*(1-.92*lib.smooth(.8*lib.litR,1.5*lib.litR,r));
+  return {ice:inp.surface>0?lib.clamp((inp.surface-line)*.8,0,p.maxIce):0};
+ }},
+load:{name:"氷の重みで沈む（循環の例）",ins:["e","ice"],outs:["surface","e"],
+ params:[{k:"k",l:"沈む割合（氷の厚さに対して）",min:0,max:.6,step:.01,v:.28}],
+ fn:function(x,y,inp,p,seed,lib){
+  // 氷が載ると岩盤が沈み、地表が下がって氷が減る。氷床ノードと輪になる
+  const bed=inp.e-inp.ice*p.k;
+  return {surface:bed+inp.ice,e:bed+inp.ice};
+ }},
+rivers:{name:"川と侵食（区画）",region:true,ins:["e"],outs:["e","river","lake"],
+ params:[{k:"cellKm",l:"升目の大きさ km",min:2,max:40,step:1,v:10},{k:"strength",l:"削る強さ",min:0,max:.2,step:.002,v:.03},{k:"rain",l:"雨の量（倍）",min:.1,max:3,step:.05,v:1},{k:"minArea",l:"川として描く集水面積 km²",min:200,max:50000,step:100,v:4000},{k:"lakeDepth",l:"湖になる窪地の深さ m",min:1,max:800,step:1,v:180},{k:"lakeCells",l:"湖になる広さ（升目の数）",min:1,max:400,step:1,v:25}],
+ fn:function(H,n,ckm,p,seed,lib,at){
+  // 区画ノード: H は周りの升目も含めた n×n の標高（m）、ckm は升目の大きさ（km）。at.x0, at.y0 は左上の升目の世界での番号。
+  // 返り値: delta（標高の変化）, area（集水面積 km²）, recv（水が流れていく先の升目）, lake（湖なら1）, level（湖の水面の標高 m）
+  const N=n*n,h=Float32Array.from(H),recv=new Int32Array(N).fill(-1),order=new Int32Array(N),seen=new Uint8Array(N);let oc=0;
+  // 1. 海と区画の縁を出口に、低い所から順に水を満たす（priority flood）。窪地は水面まで埋まる
+  const hi=[],hv=[];
+  const push=(i,v)=>{hi.push(i);hv.push(v);let k=hi.length-1;while(k>0){const q=(k-1)>>1;if(hv[q]<=hv[k])break;let t=hi[q];hi[q]=hi[k];hi[k]=t;t=hv[q];hv[q]=hv[k];hv[k]=t;k=q;}};
+  const pop=()=>{const top=hi[0],li=hi.pop(),lv=hv.pop();if(hi.length){hi[0]=li;hv[0]=lv;let k=0;for(;;){const a=2*k+1,b=a+1;let m=k;if(a<hi.length&&hv[a]<hv[m])m=a;if(b<hi.length&&hv[b]<hv[m])m=b;if(m===k)break;let t=hi[m];hi[m]=hi[k];hi[k]=t;t=hv[m];hv[m]=hv[k];hv[k]=t;k=m;}}return top;};
+  for(let i=0;i<N;i++){const r=(i/n)|0,c=i%n;if(h[i]<0||r===0||c===0||r===n-1||c===n-1){seen[i]=1;push(i,h[i]);}}
+  const DR=[-1,-1,-1,0,0,1,1,1],DC=[-1,0,1,-1,1,-1,0,1];
+  while(hi.length){const i=pop();order[oc++]=i;const r=(i/n)|0,c=i%n;
+    for(let d=0;d<8;d++){const rr=r+DR[d],cc=c+DC[d];if(rr<0||cc<0||rr>=n||cc>=n)continue;const j=rr*n+cc;if(seen[j])continue;
+      // 埋めた平らな所は少しだけ乱れを足す。足さないと水の道が一直線になる
+      seen[j]=1;if(h[j]<=h[i]+.01)h[j]=h[i]+.01+.4*lib.rnd(at.x0+cc,at.y0+rr,seed);recv[j]=i;push(j,h[j]);}}
+  // 2. 集水面積: 上流から順に、流れていく先へ面積を足していく
+  const area=new Float32Array(N).fill(ckm*ckm*p.rain);
+  for(let k=oc-1;k>=0;k--){const i=order[k],r=recv[i];if(r>=0)area[r]+=area[i];}
+  // 3. 川の侵食（ストリームパワー則 m=0.5, n=1）を河口側から陰的に解く
+  // 水に沈んだ窪地の底は削らない（削ると湖に川の形の切れ込みができる）
+  const e=Float32Array.from(h),delta=new Float32Array(N),lake=new Float32Array(N),level=new Float32Array(N);
+  for(let k=0;k<oc;k++){const i=order[k],r=recv[i];if(r<0||H[i]<0||h[i]-H[i]>1)continue;
+    const dist=((Math.abs(i-r)===1||Math.abs(i-r)===n)?1:1.414)*ckm;
+    const F=p.strength*Math.sqrt(area[i])/dist;
+    e[i]=Math.max(1,Math.min(e[i],(e[i]+F*e[r])/(1+F)));}
+  // 4. 湖: 水で埋まった窪地をつながりごとにまとめ、十分に深くて広いものだけを湖にする
+  const comp=new Int32Array(N).fill(-1),wet=i=>H[i]>=0&&h[i]-H[i]>1;
+  for(let i=0;i<N;i++){if(comp[i]>=0||!wet(i))continue;
+    const cells=[i];comp[i]=i;let deep=0;
+    for(let q=0;q<cells.length;q++){const a=cells[q],ar=(a/n)|0,ac=a%n;deep=Math.max(deep,h[a]-H[a]);
+      for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){const br=ar+dr,bc=ac+dc;if(br<0||bc<0||br>=n||bc>=n)continue;const b=br*n+bc;if(comp[b]<0&&wet(b)){comp[b]=i;cells.push(b);}}}
+    if(deep>=p.lakeDepth&&cells.length>=p.lakeCells) for(const a of cells){lake[a]=1;level[a]=h[a];}}
+  for(let i=0;i<N;i++){if(H[i]<0||lake[i])continue;delta[i]=Math.min(0,e[i]-H[i]);}
+  return {delta:delta,area:area,recv:recv,lake:lake,level:level};
+ }},
+custom:{name:"自由ノード",ins:["e"],outs:["e"],params:[{k:"a",l:"a",min:-1,max:1,step:.01,v:0}],
+ fn:function(x,y,inp,p,seed,lib){
+  // ここに処理を書く。例: 中心から遠いほど高くする
+  const r=Math.hypot(x,y);
+  return {e:inp.e+p.a*r};
+ }},
+output:{name:"出力（標高）",ins:["e","id","closing","river","lake"],outs:[],params:[],
+ fn:function(x,y,inp,p,seed,lib){ return {}; }}
+};
+/*END1*/
+
+/* ---------- graph state ---------- */
+let G2=null, sel=null, preview=null, uid=1;
+function mkNode(type,x,y,seed){
+  const T=TYPES[type],p={};T.params.forEach(q=>p[q.k]=q.v);
+  return {id:"n"+(uid++),type,name:T.name,x,y,seed:seed??Math.floor(Math.random()*1e6),
+          ins:T.ins.slice(),outs:T.outs.slice(),params:p,code:T.fn.toString()};
+}
+function defaultGraph(){
+  uid=1;
+  const n={mega:mkNode("mega",20,300,4242),plates:mkNode("plates",20,40,1469),shape:mkNode("shape",250,20,2071),boundary:mkNode("boundary",480,60,333),
+    profile:mkNode("profile",710,20,0),add:mkNode("add",710,190,0),mountains:mkNode("mountains",940,60,808),
+    seamounts:mkNode("seamounts",940,230,512),detail:mkNode("detail",1170,60,97),rivers:mkNode("rivers",1400,60,0),output:mkNode("output",1170,280,0)};
+  const W=[["mega","mega","shape","mega"],["plates","bias","shape","bias"],["shape","s","boundary","s"],["plates","bd","boundary","bd"],["plates","closing","boundary","closing"],
+    ["plates","cont","boundary","cont"],["plates","other","boundary","other"],["plates","upper","boundary","upper"],
+    ["boundary","s","profile","s"],["profile","e","add","a"],["boundary","add","add","b"],
+    ["add","e","mountains","e"],["boundary","mtn","mountains","mtn"],["mountains","e","seamounts","e"],
+    ["seamounts","e","detail","e"],["boundary","s","detail","s"],["detail","e","rivers","e"],["rivers","e","output","e"],["rivers","river","output","river"],["rivers","lake","output","lake"],
+    ["plates","id","output","id"],["plates","closing","output","closing"]];
+  return {nodes:Object.values(n),wires:W.map(w=>({from:n[w[0]].id,fp:w[1],to:n[w[2]].id,tp:w[3]}))};
+}
+function save(){try{localStorage.setItem("sf-terrain-graph-v3",JSON.stringify({g:G2,uid}));}catch(e){}}
+function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-v3")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
+G2=load()||(()=>{const g=defaultGraph();G2=g;autoLayout();return g;})();
+// built-in code from an older version of this page is brought up to date; code someone edited is left alone
+const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["if(d<d1){d2=d1;bx=ax;by=ay;"],boundary:["if(inp.cont&&inp.other){"],profile:["if(s>=0) e=5+p.landH"]};
+function upgradeGraph(g){g.nodes.forEach(n=>{
+  if(n.type==="output")["river","lake"].forEach(k=>{if(!n.ins.includes(k))n.ins.push(k);});
+  if(OLD_CODE[n.type]&&TYPES[n.type]&&OLD_CODE[n.type].some(f=>n.code&&n.code.includes(f))) n.code=TYPES[n.type].fn.toString();});}
+upgradeGraph(G2);
+
+/*CORE2*/
+/* ---------- compile ---------- */
+const compiled=new Map(); // node id -> {code, fn}
+let evalOK=true;
+function nodeFn(n){
+  const T=TYPES[n.type];
+  if(T&&n.code===T.fn.toString()) return T.fn;
+  const c=compiled.get(n.id);
+  if(c&&c.code===n.code) return c.fn;
+  let fn;
+  try{fn=(new Function("return ("+n.code+")"))();}
+  catch(e){ if(e instanceof EvalError){evalOK=false;throw new Error("このページでは処理の書き換えが使えません（ブラウザが禁止）。初期の処理に戻してください。");} throw new Error(n.name+": "+e.message); }
+  if(typeof fn!=="function") throw new Error(n.name+": 関数になっていません");
+  compiled.set(n.id,{code:n.code,fn});return fn;
+}
+/* Units = nodes in run order. Nodes wired into a ring form one loop unit (strongly connected component),
+   placed in one column and run `loops` times per point; inside the ring a node reads its partner's latest value. */
+function analyse(onlyReachable,rootId,dropRoot){
+  const byId=Object.fromEntries(G2.nodes.map(n=>[n.id,n]));
+  const W=G2.wires.filter(w=>byId[w.from]&&byId[w.to]);
+  let ids=G2.nodes.map(n=>n.id);
+  if(onlyReachable){
+    if(!rootId){const out=G2.nodes.find(n=>n.type==="output");if(!out) throw new Error("出力ノードがありません");rootId=out.id;}
+    const seen=new Set([rootId]),st=[rootId];
+    while(st.length){const id=st.pop();W.forEach(w=>{if(w.to===id&&!seen.has(w.from)){seen.add(w.from);st.push(w.from);}});}
+    if(dropRoot) seen.delete(rootId);
+    ids=ids.filter(id=>seen.has(id));
+  }
+  const set=new Set(ids),E=W.filter(w=>set.has(w.from)&&set.has(w.to));
+  // Tarjan
+  let index=0;const idx={},low={},on={},stack=[],comps=[];
+  const strong=v=>{idx[v]=low[v]=index++;stack.push(v);on[v]=true;
+    for(const w of E) if(w.from===v){const u=w.to;if(idx[u]==null){strong(u);low[v]=Math.min(low[v],low[u]);}else if(on[u])low[v]=Math.min(low[v],idx[u]);}
+    if(low[v]===idx[v]){const c=[];let u;do{u=stack.pop();on[u]=false;c.push(u);}while(u!==v);comps.push(c);}};
+  ids.forEach(v=>{if(idx[v]==null)strong(v);});
+  comps.reverse(); // Tarjan yields reverse topological order
+  const compOf={};comps.forEach((c,i)=>c.forEach(id=>compOf[id]=i));
+  const col=new Array(comps.length).fill(0);
+  comps.forEach((c,i)=>{E.forEach(w=>{if(compOf[w.to]===i&&compOf[w.from]!==i)col[i]=Math.max(col[i],col[compOf[w.from]]+1);});});
+  const loop=comps.map(c=>c.length>1||E.some(w=>w.from===c[0]&&w.to===c[0]));
+  // inside a ring, keep the board's top-to-bottom order
+  comps.forEach(c=>c.sort((a,b)=>byId[a].y-byId[b].y));
+  return {byId,E,comps,col,loop};
+}
+function plan(rootId,dropRoot){
+  if(!rootId) regionInfo=[];
+  const A=analyse(true,rootId,dropRoot),{byId,E,comps,loop}=A;
+  const order=[].concat(...comps),pos=Object.fromEntries(order.map((id,i)=>[id,i]));
+  comps.forEach((c,i)=>{if(loop[i]&&c.some(id=>TYPES[byId[id].type]&&TYPES[byId[id].type].region)) throw new Error("区画ノードは循環の中に置けません");});
+  const steps=order.map(id=>{const n=byId[id],isRegion=TYPES[n.type]&&TYPES[n.type].region;
+    return {n,fn:isRegion?makeRegionStep(n,nodeFn(n)):nodeFn(n),ins:n.ins.map(name=>{const w=E.find(w=>w.to===id&&w.tp===name);return [name,w?pos[w.from]:-1,w?w.fp:null];})};});
+  const units=comps.map((c,i)=>({ks:c.map(id=>pos[id]),loop:loop[i]}));
+  const root=rootId||G2.nodes.find(n=>n.type==="output").id;
+  return {steps,units,outIdx:dropRoot?-1:pos[root]};
+}
+/* ---------- area nodes: worked out on world-fixed tiles (with the 8 neighbouring tiles as margin) and cached,
+   so the result does not depend on where or how far the map is zoomed ---------- */
+const TILE=64,tileCache=new Map();let regionInfo=[],regionSkipped=false,regionBusy=0;
+function cacheGet(k){return tileCache.get(k);}
+function cacheSet(k,v){tileCache.set(k,v);if(tileCache.size>3000)tileCache.delete(tileCache.keys().next().value);}
+function regionSig(n,sub){
+  return JSON.stringify([loopCount,n.code,n.params,n.seed,sub.steps.map(s=>[s.n.id,s.n.code,s.n.params,s.n.seed,s.ins])]);
+}
+function makeRegionStep(n,fn){
+  if(!n.ins.length) throw new Error(n.name+": 入力がありません");
+  const sub=plan(n.id,true),inPort=n.ins[0];
+  const w=G2.wires.find(w=>w.to===n.id&&w.tp===inPort);
+  const src=w?sub.steps.findIndex(s=>s.n.id===w.from):-1,port=w?w.fp:null;
+  const sig=hashStr(regionSig(n,sub)),ckm=Math.max(.5,+n.params.cellKm||10),T=TILE;
+  const subEval=makeEval(sub);
+  // the raw heights depend only on what comes in, so changing this node's own settings reuses them
+  const rsig=hashStr(JSON.stringify([loopCount,ckm,src,port,sub.steps.map(s=>[s.n.id,s.n.code,s.n.params,s.n.seed,s.ins])]));
+  const rawTile=(ti,tj)=>{const k=rsig+"|r|"+ti+","+tj;let t=cacheGet(k);if(t)return t;
+    t=new Float32Array(T*T);const saved=lib.pxKm;lib.pxKm=ckm;
+    for(let r=0;r<T;r++)for(let c=0;c<T;c++){const res=subEval((ti*T+c+.5)*ckm,(tj*T+r+.5)*ckm);const v=src>=0?res[src][port]:0;t[r*T+c]=(typeof v==="number"&&isFinite(v))?v:0;}
+    lib.pxKm=saved;cacheSet(k,t);return t;};
+  const jit=(x,y,k)=>(lib.rnd(x,y,n.seed*7+k)-.5)*.7;   // 升目の中心をずらして、川が格子に沿って見えないようにする
+  const procTile=(ti,tj)=>{const k=sig+"|p|"+ti+","+tj;let t=cacheGet(k);if(t)return t;
+    regionBusy++;
+    const n3=3*T,H=new Float32Array(n3*n3);
+    for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const rt=rawTile(ti+di,tj+dj);for(let r=0;r<T;r++)H.set(rt.subarray(r*T,r*T+T),((dj+1)*T+r)*n3+(di+1)*T);}
+    const out=fn(H,n3,ckm,n.params,n.seed,lib,{x0:(ti-1)*T,y0:(tj-1)*T})||{};
+    const delta=new Float32Array(T*T),river=new Float32Array(T*T),lake=new Float32Array(T*T),lvl=new Float32Array(T*T).fill(NaN),segs=[],minA=+n.params.minArea||1000;
+    const A_=out.area,R_=out.recv,L_=out.lake,N3=n3*n3,up=new Uint8Array(N3),fromLake=new Int32Array(N3).fill(-1);
+    const inLake=j=>!!(L_&&L_[j]>.5);
+    // rivers stop at a lake and start again at its outlet: water that comes out of a lake does not count as a river upstream
+    if(A_&&R_) for(let j=0;j<N3;j++) if(A_[j]>minA&&H[j]>=0&&R_[j]>=0){if(inLake(j)) fromLake[R_[j]]=j;else up[R_[j]]=1;}
+    const Pt=j=>{const x=ti*T+(j%n3)-T,y=tj*T+Math.floor(j/n3)-T;return [(x+.5+jit(x,y,1))*ckm,(y+.5+jit(x,y,2))*ckm];};
+    for(let r=0;r<T;r++)for(let c=0;c<T;c++){const i=(T+r)*n3+T+c,o=r*T+c;
+      delta[o]=out.delta?out.delta[i]:0;lake[o]=out.lake?out.lake[i]:0;if(out.level&&lake[o]>.5) lvl[o]=out.level[i];
+      const A=out.area?out.area[i]:0;river[o]=A>minA&&H[i]>=0&&!inLake(i)?Math.log10(A/minA)+.2:0;
+      // each river cell draws the curve from the middle of its own reach to the middle of the next one,
+      // bending through the receiver's point: neighbours share the end points, so the line runs on unbroken across tiles
+      if(river[o]>0&&R_&&R_[i]>=0){const rI=R_[i],pi=Pt(i),pr=Pt(rI),m1=[(pi[0]+pr[0])/2,(pi[1]+pr[1])/2],w=river[o];
+        if(!up[i]){
+          // a lake outlet begins inside the lake (the drawing is trimmed at the shore); a spring begins at its own cell
+          if(fromLake[i]>=0&&!up[i]){const pl=Pt(fromLake[i]),m0=[(pl[0]+pi[0])/2,(pl[1]+pi[1])/2];segs.push(pl[0],pl[1],m0[0],m0[1],m0[0],m0[1],w,m0[0],m0[1],pi[0],pi[1],m1[0],m1[1],w);}
+          else segs.push(pi[0],pi[1],(pi[0]+m1[0])/2,(pi[1]+m1[1])/2,m1[0],m1[1],w);}
+        const rr=R_[rI];
+        // at the mouth, run on past the coarse sea cell; the drawing is trimmed later by the fine coastline
+        if(H[rI]<0||rr<0) segs.push(m1[0],m1[1],pr[0],pr[1],pr[0]+(pr[0]-m1[0])*1.5,pr[1]+(pr[1]-m1[1])*1.5,w);
+        else{const prr=Pt(rr);segs.push(m1[0],m1[1],pr[0],pr[1],(pr[0]+prr[0])/2,(pr[1]+prr[1])/2,w);}
+      }}
+    t={delta,river,lake,lvl,segs};cacheSet(k,t);return t;};
+  let lt=null,lti=1e9,ltj=1e9;
+  const tileAt=(ti,tj)=>{if(ti===lti&&tj===ltj)return lt;lti=ti;ltj=tj;return lt=procTile(ti,tj);};
+  const out3={e:0,river:0,lake:0};
+  const sample=(x,y,base)=>{
+    const gx=x/ckm-.5,gy=y/ckm-.5,ix=Math.floor(gx),iy=Math.floor(gy),fx=gx-ix,fy=gy-iy;let d=0,rv=0,lk=0,lv=-Infinity;
+    for(let q=0;q<4;q++){const cx=ix+(q&1),cy=iy+(q>>1),wgt=((q&1)?fx:1-fx)*((q>>1)?fy:1-fy);
+      const ti=Math.floor(cx/T),tj=Math.floor(cy/T),t=tileAt(ti,tj),o=(cy-tj*T)*T+(cx-ti*T);
+      if(t.lvl&&t.lvl[o]>lv) lv=t.lvl[o];   // NaN compares false
+      if(wgt===0)continue;d+=t.delta[o]*wgt;rv+=t.river[o]*wgt;lk+=t.lake[o]*wgt;}
+    out3.e=base+d;out3.river=rv;
+    // with a water level, the lake fills the fine terrain up to that level, so its shore follows the contours;
+    // without one (older code), the coarse 0/1 mask is used as it is
+    out3.lake=lv>-Infinity?clamp(.5+(lv-out3.e)/10,0,1):lk;return out3;};
+  regionInfo.push({sig,ckm,T,name:n.name});
+  regionFns.set(n.id,{sig,rsig,ckm,T,rawTile,procTile});
+  return function(x,y,inp){
+    const base=inp[inPort]||0;
+    if(lib.noRegion) return {e:base,river:0,lake:0};
+    if(lib.pxKm>4*ckm){regionSkipped=true;return {e:base,river:0,lake:0};}
+    const r=sample(x,y,base);return {e:r.e,river:r.river,lake:r.lake};
+  };
+}
+/* The rivers come from coarse cells, so at close zoom one piece of river can run straight over a bay and out
+   onto the far shore. Each river is followed downstream on the map as drawn: where it first passes from land
+   into sea or lake it ends there, and everything below that point is dropped. Returns screen-space pieces. */
+function riversOnScreen(toS,W,H){
+  const {Nx,Ny,E,LK}=grid,raw=[];
+  for(const sg of riverSegsInView(grid.cx,grid.cy,grid.w,grid.h)) for(let i=0;i<sg.length;i+=7) raw.push(i,sg);
+  const n=raw.length/2,key=(x,y)=>Math.round(x*1e4)+","+Math.round(y*1e4),starts=new Map(),preds=new Int32Array(n);
+  const segAt=k=>{const sg=raw[2*k+1],i=raw[2*k];return sg.subarray?sg.subarray(i,i+7):sg.slice(i,i+7);};
+  const S=[];for(let k=0;k<n;k++){const a=segAt(k);S.push(a);const ks=key(a[0],a[1]);(starts.get(ks)||starts.set(ks,[]).get(ks)).push(k);}
+  const next=S.map(a=>starts.get(key(a[4],a[5]))||[]);
+  next.forEach(L=>L.forEach(j=>preds[j]++));
+  // water test on the drawn map (the same edge the coastline and the water mask follow); null = outside the view
+  const wet=(sx,sy)=>{const gx=sx/W*Nx-.5,gy=sy/H*Ny-.5;if(gx<-.5||gy<-.5||gx>Nx-.5||gy>Ny-.5) return null;
+    const x0=clamp(Math.floor(gx),0,Math.max(0,Nx-2)),y0=clamp(Math.floor(gy),0,Math.max(0,Ny-2)),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),x1=Math.min(x0+1,Nx-1),y1=Math.min(y0+1,Ny-1);
+    const bl=A=>(A[y0*Nx+x0]*(1-fx)+A[y0*Nx+x1]*fx)*(1-fy)+(A[y1*Nx+x0]*(1-fx)+A[y1*Nx+x1]*fx)*fy;
+    return bl(E)<0||(LK&&bl(LK)>.5);};
+  const live=new Int32Array(n),seen=new Int32Array(n),landIn=new Uint8Array(n),out=[],queue=[];
+  for(let k=0;k<n;k++) if(!preds[k]) queue.push(k);
+  for(let q=0;q<queue.length;q++){const k=queue[q],a=S[k];
+    const fed=seen[k]>0,go=!fed||live[k]>0;   // a piece below a river that already ended is not drawn
+    let cut=go?1:-1,landEnd=false;
+    if(go){
+      const [x1,y1]=toS(a[0],a[1]),[qx,qy]=toS(a[2],a[3]),[x2,y2]=toS(a[4],a[5]);
+      const len=Math.hypot(qx-x1,qy-y1)+Math.hypot(x2-qx,y2-qy),steps=clamp(Math.ceil(len/2),2,4000);
+      let land=landIn[k]>0;   // carried on from the piece above; a spring or a lake outlet may start in water
+      if(!((x1<-5&&x2<-5&&qx<-5)||(x1>W+5&&x2>W+5&&qx>W+5)||(y1<-5&&y2<-5&&qy<-5)||(y1>H+5&&y2>H+5&&qy>H+5)))
+        for(let t=0;t<=steps;t++){const u=t/steps,v=1-u,px=v*v*x1+2*u*v*qx+u*u*x2,py=v*v*y1+2*u*v*qy+u*u*y2,w=wet(px,py);
+          if(w===null) continue;if(!w){land=true;continue;}if(land){cut=u;break;}}
+      landEnd=land;
+      if(cut>0){const u=cut,mx=x1+u*(qx-x1),my=y1+u*(qy-y1),v=1-u,ex=v*v*x1+2*u*v*qx+u*u*x2,ey=v*v*y1+2*u*v*qy+u*u*y2;out.push([x1,y1,mx,my,ex,ey,a[6]]);}
+    }
+    for(const j of next[k]){seen[j]++;if(cut===1){live[j]++;if(landEnd)landIn[j]=1;}if(seen[j]===preds[j])queue.push(j);}
+  }
+  return out;
+}
+function riverSegsInView(cx,cy,w,h){
+  const segs=[];
+  for(const info of regionInfo){
+    const span=info.T*info.ckm,t0=Math.floor((cx-w/2)/span),t1=Math.floor((cx+w/2)/span),u0=Math.floor((cy-h/2)/span),u1=Math.floor((cy+h/2)/span);
+    if((t1-t0+1)*(u1-u0+1)>400) continue;
+    for(let tj=u0;tj<=u1;tj++)for(let ti=t0;ti<=t1;ti++){const t=tileCache.get(info.sig+"|p|"+ti+","+tj);if(t)segs.push(t.segs);}
+  }
+  return segs;
+}
+const EMPTY={};
+function makeEval(pl){
+  const N=pl.steps.length,res=new Array(N).fill(EMPTY);
+  const run=k=>{const st=pl.steps[k],inp={};
+    for(const [name,src,port] of st.ins){const v=src>=0?res[src][port]:0;inp[name]=(typeof v==="number"&&isFinite(v))?v:0;}
+    evalStep=k;res[k]=st.fn(x0,y0,inp,st.n.params,st.n.seed,lib)||EMPTY;};
+  let x0=0,y0=0;
+  return function(x,y){
+    x0=x;y0=y;
+    for(const u of pl.units){
+      if(!u.loop){run(u.ks[0]);continue;}
+      for(const k of u.ks) res[k]=EMPTY;
+      for(let it=0;it<loopCount;it++) for(const k of u.ks) run(k);
+    }
+    return res;
+  };
+}
+let loopCount=4;
+function autoLayout(){
+  const A=analyse(false),cols={};
+  A.comps.forEach((c,i)=>{(cols[A.col[i]]=cols[A.col[i]]||[]).push(c);});
+  const h=n=>34+20*Math.max(n.ins.length,n.outs.length,1)+8;
+  Object.entries(cols).forEach(([ci,cs])=>{let y=20;cs.forEach(c=>{c.forEach(id=>{const n=A.byId[id];n.x=20+ci*230;n.y=y;y+=h(n)+18;});y+=14;});});
+}
+let evalStep=0;
+/* ---------- rows of the map, with every node's result kept per view:
+   when one node changes, the nodes above it are read back instead of worked out again ---------- */
+function hashStr(str){let h1=0xdeadbeef,h2=0x41c6ce57;for(let i=0;i<str.length;i++){const c=str.charCodeAt(i);h1=Math.imul(h1^c,2654435761);h2=Math.imul(h2^c,1597334677);}
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (h2>>>0).toString(36)+(h1>>>0).toString(36);}
+function stepSigs(pl){
+  const sig=new Array(pl.steps.length);
+  for(const u of pl.units){
+    const parts=u.ks.map(k=>{const st=pl.steps[k];return [st.n.type,hashStr(st.n.code||""),st.n.params,st.n.seed,st.ins.map(([nm,src,port])=>[nm,src>=0&&!u.ks.includes(src)?sig[src]:u.ks.indexOf(src),port])];});
+    const us=hashStr(JSON.stringify([u.loop?loopCount:0,lib.litR,lib.noRegion?1:0,parts]));
+    u.ks.forEach((k,i)=>sig[k]=us+"#"+i);}
+  return sig;
+}
+function evalRows(pl,v,Nx,Ny,pxKm,r0,r1,pv,cache){
+  lib.pxKm=pxKm;
+  const vk=[v.cx,v.cy,v.w,v.h,Nx,Ny,r0,r1].join();
+  if(cache.vk!==vk){cache.vk=vk;cache.m=new Map();}
+  const sig=stepSigs(pl),n=(r1-r0)*Nx,N=pl.steps.length,steps=pl.steps;
+  for(const st of steps){const T=TYPES[st.n.type];if(T&&T.region&&!lib.noRegion&&pxKm>4*Math.max(.5,+st.n.params.cellKm||10)) regionSkipped=true;}
+  const have=pl.units.map(u=>u.ks.every(k=>cache.m.has(sig[k])));
+  const store=new Array(N),objs=new Array(N),keys=new Array(N);
+  pl.units.forEach((u,ui)=>u.ks.forEach(k=>{
+    if(have[ui]){store[k]=cache.m.get(sig[k]);objs[k]={};keys[k]=Object.keys(store[k]);}
+    else{store[k]={};for(const port of steps[k].n.outs) store[k][port]=new Float64Array(n);keys[k]=steps[k].n.outs;}}));
+  const res=new Array(N).fill(EMPTY),oi=pl.outIdx,oin=steps[oi].ins;
+  const E=new Float32Array(n),ID=new Float64Array(n),CL=new Float32Array(n),LK=new Float32Array(n),PV=pv?new Float32Array(n):null;
+  const pvIdx=pv?steps.findIndex(st=>st.n.id===pv.id):-1;
+  let x0=0,y0=0;
+  const run=k=>{const st=steps[k],inp={};
+    for(const [name,src,port] of st.ins){const q=src>=0?res[src][port]:0;inp[name]=(typeof q==="number"&&isFinite(q))?q:0;}
+    evalStep=k;res[k]=st.fn(x0,y0,inp,st.n.params,st.n.seed,lib)||EMPTY;};
+  for(let i=0;i<n;i++){
+    const c=i%Nx,row=r0+(i/Nx|0);x0=v.cx+(c+.5-Nx/2)*pxKm;y0=v.cy+(row+.5-Ny/2)*pxKm;
+    for(let ui=0;ui<pl.units.length;ui++){const u=pl.units[ui];
+      if(have[ui]){for(const k of u.ks){const o=objs[k],a=store[k];for(const port of keys[k]) o[port]=a[port][i];res[k]=o;}continue;}
+      if(!u.loop) run(u.ks[0]);
+      else{for(const k of u.ks) res[k]=EMPTY;for(let it=0;it<loopCount;it++) for(const k of u.ks) run(k);}
+      for(const k of u.ks){const r=res[k],a=store[k];for(const port of keys[k]){const q=r[port];a[port][i]=typeof q==="number"?q:NaN;}}
+    }
+    E[i]=val(res,oin[0]);ID[i]=val(res,oin[1]);CL[i]=val(res,oin[2]);if(oin[4])LK[i]=val(res,oin[4]);
+    if(PV) PV[i]=pvIdx>=0?(+res[pvIdx][pv.port]||0):0;
+  }
+  // keep only what this view needs now
+  const m=new Map();for(let k=0;k<N;k++) m.set(sig[k],store[k]);cache.m=m;
+  return {E,ID,CL,LK,PV};
+}
+function val(r,ins){const src=ins[1],port=ins[2];if(src<0) return 0;const v=r[src][port];return (typeof v==="number"&&isFinite(v))?v:0;}
+const regionFns=new Map();
+/*END2*/
+
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+/* ---------- map view ---------- */
+const mapC=document.getElementById("map"),ovl=document.getElementById("ovl"),box=document.getElementById("mapbox");
+const statusEl=document.getElementById("status"),progEl=document.getElementById("prog");
+const view={cx:0,cy:0,w:9000};        // w = width of the view in km; height follows the box
+let litR=2200;
+let grid=null; // {Nx,Ny,E,ID,CL,PV,pxKm,cx,cy,w,h}
+let job=0;
+const boxW=()=>box.clientWidth||600,boxH=()=>box.clientHeight||600;
+const viewH=()=>view.w*boxH()/boxW();
+function setStatus(t,err){statusEl.textContent=t;statusEl.classList.toggle("err",!!err);}
+/* ---------- workers: the same toolbox and node code run in background threads, one band of the map each ---------- */
+function workerMain(){
+  let gKey="",bandCache={};
+  const send=(m,tr)=>postMessage(m,tr||[]);
+  onmessage=e=>{const m=e.data;
+    if(m.type==="ping"){send({id:m.id,out:"pong"});return;}
+    try{
+      if(m.graphKey!==gKey){G2=JSON.parse(m.graph);gKey=m.graphKey;compiled.clear();bandCache={};}
+      loopCount=m.loopCount;lib.litR=m.litR;lib.noRegion=false;lib.pxKm=m.pxKm||10;
+      if(m.tiles) for(const [k,t] of m.tiles) cacheSet(k,t);
+      const pl=plan();
+      if(m.type==="raw"){const R=regionFns.get(m.node);send({id:m.id,out:m.list.map(([ti,tj])=>[R.rsig+"|r|"+ti+","+tj,R.rawTile(ti,tj)])});}
+      else if(m.type==="proc"){const R=regionFns.get(m.node);send({id:m.id,out:m.list.map(([ti,tj])=>[R.sig+"|p|"+ti+","+tj,R.procTile(ti,tj)])});}
+      else if(m.type==="rows"){regionSkipped=false;
+        const r=evalRows(pl,m.v,m.Nx,m.Ny,m.pxKm,m.r0,m.r1,m.preview,bandCache);
+        send({id:m.id,out:r,skipped:regionSkipped},[r.E.buffer,r.ID.buffer,r.CL.buffer,r.LK.buffer].concat(r.PV?[r.PV.buffer]:[]));}
+      else send({id:m.id,out:"ok"});
+    }catch(err){send({id:m.id,err:String(err&&err.message||err),evalErr:err instanceof EvalError,step:evalStep});}
+  };
+}
+const pool={ws:[],ok:false,pending:[],seq:0};
+function poolStart(){
+  try{
+    const cut=(a,b)=>{const i=SRC.indexOf(a),j=SRC.indexOf(b);if(i<0||j<0)throw new Error("source");return SRC.slice(i,j);};
+    const code='"use strict";let G2=null,preview=null;\n'+cut("/*CORE1*/","/*END1*/")+cut("/*CORE2*/","/*END2*/")+"\n("+workerMain.toString()+")();";
+    const url=URL.createObjectURL(new Blob([code],{type:"text/javascript"}));
+    const n=clamp((navigator.hardwareConcurrency||4)-1,2,8);
+    pool.url=url;pool.ws=[];for(let i=0;i<n;i++) pool.ws.push(poolSpawn());
+    pool.ok=true;
+    // threads that never answer (blocked by the page's host) are given up after a few seconds
+    pool.ready=Promise.race([Promise.all(pool.ws.map((r,i)=>poolCall(i,{type:"ping"}))).then(rs=>rs.every(r=>r.out==="pong")),new Promise(res=>setTimeout(()=>res(false),4000))])
+      .then(ok=>{if(!ok){pool.ok=false;pool.ws.forEach(r=>r.w.terminate());pool.ws=[];}return ok;});
+  }catch(e){pool.ok=false;}
+}
+function poolSpawn(){
+  const w=new Worker(pool.url),rec={w,busy:0,cbs:new Map()};
+  w.onmessage=e=>{const cb=rec.cbs.get(e.data.id);if(!cb)return;rec.cbs.delete(e.data.id);rec.busy--;cb(e.data);};
+  w.onerror=e=>{e.preventDefault&&e.preventDefault();rec.dead=true;for(const cb of rec.cbs.values()) cb({err:"worker",fatal:true});rec.cbs.clear();rec.busy=0;};
+  return rec;
+}
+function poolCall(i,msg,transfer){
+  const rec=pool.ws[i];if(rec.dead) return Promise.resolve({err:"worker",fatal:true});const id=++pool.seq;rec.busy++;
+  return new Promise(res=>{rec.cbs.set(id,res);rec.w.postMessage({...msg,id},transfer||[]);});
+}
+function poolReset(){  // a new picture is wanted: stop threads still busy with the old one
+  pool.ws=pool.ws.map(r=>{if(r.busy>0){r.w.terminate();for(const cb of r.cbs.values()) cb({err:"stopped",stopped:true});return poolSpawn();}return r;});
+}
+const mainCache={},coarseCache={};
+function render(){
+  const my=++job;
+  let pl;
+  try{pl=plan();markBad(null);}catch(e){setStatus(e.message,true);markBad(null);return;}
+  const W=boxW(),H=boxH(),full=Math.min(box.classList.contains("max")?720:460,Math.round(W*Math.min(devicePixelRatio||1,1.5)))||400;
+  const v={...view,h:viewH()};
+  setStatus("計算中…（区画ノードは初回だけ時間がかかります）");regionSkipped=false;
+  // a quick coarse picture first, without the area nodes, so something shows at once
+  {const Nx=96,Ny=Math.max(1,Math.round(Nx*H/W)),pxKm=v.w/Nx;lib.noRegion=true;
+    try{const r=evalRows(pl,v,Nx,Ny,pxKm,0,Ny,preview,coarseCache);grid={Nx,Ny,...r,pxKm,...v};paint();}
+    catch(e){lib.noRegion=false;const bad=pl.steps[evalStep];markBad(bad&&bad.n.id);setStatus((bad?bad.n.name+": ":"")+e.message,true);return;}
+    lib.noRegion=false;}
+  const Nx=full,Ny=Math.max(1,Math.round(Nx*H/W)),pxKm=v.w/Nx;
+  const finish=(r,skipped)=>{if(my!==job)return;lib.pxKm=pxKm;regionSkipped=skipped;grid={Nx,Ny,...r,pxKm,...v};paint();progEl.style.width="0";
+    setStatus(preview?"途中結果: "+previewLabel():"描画済み · 1px ≈ "+fmtKm(pxKm)+(skipped?"（区画ノードは拡大すると計算します）":""));drawHyp();};
+  const fail=(step,msg)=>{if(my!==job)return;const bad=pl.steps[step];markBad(bad&&bad.n.id);progEl.style.width="0";setStatus((bad?bad.n.name+": ":"")+msg,true);};
+  if(pool.ok) renderPool(my,pl,v,Nx,Ny,pxKm,finish,fail);
+  else renderMain(my,pl,v,Nx,Ny,pxKm,finish,fail);
+}
+function renderMain(my,pl,v,Nx,Ny,pxKm,finish,fail){
+  // without threads: bands of 16 rows, one per frame, so the page stays responsive
+  const B=16,parts=[];let r0=0;regionSkipped=false;let skipped=false;
+  const step=()=>{
+    if(my!==job) return;
+    const t0=performance.now();
+    try{while(r0<Ny&&performance.now()-t0<30){const r1=Math.min(Ny,r0+B);regionSkipped=false;
+      parts.push(evalRows(pl,v,Nx,Ny,pxKm,r0,r1,preview,mainCache[r0]||(mainCache[r0]={})));skipped=skipped||regionSkipped;r0=r1;}}
+    catch(e){fail(evalStep,e.message);return;}
+    progEl.style.width=(100*r0/Ny)+"%";
+    if(r0<Ny){requestAnimationFrame(step);return;}
+    finish(joinRows(parts,Nx*Ny),skipped);
+  };
+  step();
+}
+function joinRows(parts,n){
+  const out={E:new Float32Array(n),ID:new Float64Array(n),CL:new Float32Array(n),LK:new Float32Array(n),PV:parts[0]&&parts[0].PV?new Float32Array(n):null};
+  let o=0;for(const p of parts){for(const k of ["E","ID","CL","LK","PV"]) if(out[k]&&p[k]) out[k].set(p[k],o);o+=p.E.length;}
+  return out;
+}
+function tilesFor(R,x0,y0,x1,y1){const c0=Math.floor(x0/R.ckm-.5)-1,c1=Math.floor(x1/R.ckm-.5)+2,r0=Math.floor(y0/R.ckm-.5)-1,r1=Math.floor(y1/R.ckm-.5)+2,T=R.T,L=[];
+  for(let tj=Math.floor(r0/T);tj<=Math.floor(r1/T);tj++)for(let ti=Math.floor(c0/T);ti<=Math.floor(c1/T);ti++)L.push([ti,tj]);return L;}
+async function renderPool(my,pl,v,Nx,Ny,pxKm,finish,fail){
+  if(!(await pool.ready)){if(my===job) renderMain(my,pl,v,Nx,Ny,pxKm,finish,fail);return;}
+  if(my!==job) return;
+  poolReset();
+  const gs=JSON.stringify(G2),base={graph:gs,graphKey:hashStr(gs),loopCount,litR:lib.litR,pxKm};
+  const P=pool.ws.length,X0=v.cx-v.w/2,X1=v.cx+v.w/2,Y0=v.cy-v.h/2,Y1=v.cy+v.h/2;
+  const spread=async(type,node,list,extra)=>{   // share a list of tiles out among the threads, keep what comes back
+    const chunks=Array.from({length:P},()=>[]);list.forEach((t,i)=>chunks[i%P].push(t));
+    const rs=await Promise.all(chunks.map((c,i)=>c.length?poolCall(i,{...base,type,node,list:c,tiles:extra?extra(c):null}):null));
+    for(const r of rs){if(!r)continue;if(r.err) throw r;for(const [k,t] of r.out) cacheSet(k,t);}
+  };
+  try{
+    // 1. area nodes: first the raw heights of the tiles, then the rivers and lakes of each tile, all threads at once
+    const regs=pl.steps.filter(st=>TYPES[st.n.type]&&TYPES[st.n.type].region).map(st=>[st.n.id,regionFns.get(st.n.id)]).filter(([,R])=>R&&pxKm<=4*R.ckm);
+    for(const [id,R] of regs){
+      const need=tilesFor(R,X0,Y0,X1,Y1).filter(([ti,tj])=>!tileCache.has(R.sig+"|p|"+ti+","+tj));
+      if(!need.length) continue;
+      const rawSet=new Map();for(const [ti,tj] of need)for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const k=R.rsig+"|r|"+(ti+di)+","+(tj+dj);if(!tileCache.has(k))rawSet.set(k,[ti+di,tj+dj]);}
+      setStatus("計算中…区画 "+need.length+" 枚（"+P+" 本で並列）");progEl.style.width="10%";
+      await spread("raw",id,[...rawSet.values()]);if(my!==job)return;
+      progEl.style.width="40%";
+      await spread("proc",id,need,c=>{const m=[];for(const [ti,tj] of c)for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const k=R.rsig+"|r|"+(ti+di)+","+(tj+dj);m.push([k,tileCache.get(k)]);}return m;});
+      if(my!==job)return;
+    }
+    progEl.style.width="70%";
+    // 2. the map itself, in bands of rows; each thread gets the area tiles its band touches
+    const bands=[];for(let i=0;i<P;i++){const r0=Math.round(i*Ny/P),r1=Math.round((i+1)*Ny/P);if(r1>r0)bands.push([r0,r1]);}
+    const rs=await Promise.all(bands.map(([r0,r1],i)=>{
+      const ya=v.cy+(r0-Ny/2)*pxKm,yb=v.cy+(r1-Ny/2)*pxKm,tiles=[];
+      for(const [,R] of regs)for(const [ti,tj] of tilesFor(R,X0,ya,X1,yb)){const k=R.sig+"|p|"+ti+","+tj,t=tileCache.get(k);if(t)tiles.push([k,t]);}
+      return poolCall(i,{...base,type:"rows",v,Nx,Ny,r0,r1,preview,tiles});}));
+    if(my!==job)return;
+    let skipped=false;for(const r of rs){if(r.err) throw r;skipped=skipped||r.skipped;}
+    finish(joinRows(rs.map(r=>r.out),Nx*Ny),skipped);
+  }catch(r){
+    if(my!==job||r.stopped) return;
+    if(r.fatal||r.evalErr){pool.ok=false;renderMain(my,pl,v,Nx,Ny,pxKm,finish,fail);return;}   // threads unusable here: do it on the page
+    fail(r.step,r.err||String(r));
+  }
+}
+function fmtKm(k){return k>=10?Math.round(k)+" km":k>=1?k.toFixed(1)+" km":Math.round(k*1000)+" m";}
+
+const layers={};
+["lLit","lContour","lShade","lPlate","lWind","lFog","lGrid","lPins","lRiver"].forEach(id=>{const el=document.getElementById(id);layers[id]=el.checked;el.addEventListener("change",()=>{layers[id]=el.checked;if(id==="lLit")document.getElementById("litField").hidden=!el.checked;paint();});});
+
+function landCol(e){const t=clamp(e/3200,0,1);return [233-40*t-10*t*t,221-50*t,191-62*t];}
+function seaCol(e){const d=-e;if(d<200){const t=d/200;return [214-8*t,222-6*t,206-2*t];}const t=clamp((d-200)/5800,0,1);return [196-80*t,212-72*t,204-60*t];}
+const ISO=[-200,-1000,-2000,-3000,-4000,-5000,-6000,-7000,-8000,-9000,-10000];
+function seaLvl(e){let n=0;for(const z of ISO) if(e<z) n++;return n;}
+const reliefC=document.createElement("canvas");
+function landStepFor(pxKm,mx){
+  // finer when zoomed in, but never more than ~40 contour levels for the highest point in view
+  let s=pxKm<0.3?20:pxKm<1.5?100:pxKm<6?250:500;
+  const seq=[20,50,100,250,500,1000,2500,5000];
+  while(mx/s>40){const i=seq.indexOf(s);s=i>=0&&i<seq.length-1?seq[i+1]:s*2;}
+  return s;
+}
+function paint(){
+  if(!grid) return;
+  const {Nx,Ny,E,ID,CL,PV,pxKm}=grid;
+  // 1) relief colours at grid resolution
+  reliefC.width=Nx;reliefC.height=Ny;
+  const rc=reliefC.getContext("2d"),img=rc.createImageData(Nx,Ny),d=img.data;
+  let pmin=Infinity,pmax=-Infinity;
+  if(PV){for(let k=0;k<PV.length;k++){if(PV[k]<pmin)pmin=PV[k];if(PV[k]>pmax)pmax=PV[k];}if(pmax===pmin)pmax=pmin+1;}
+  for(let r=0;r<Ny;r++)for(let c=0;c<Nx;c++){
+    const k=r*Nx+c,e=E[k];let col;
+    if(PV){const t=(PV[k]-pmin)/(pmax-pmin);col=[60+180*t,45+170*t,30+150*t];}
+    else{col=reliefCol(r,c);if(grid.LK&&grid.LK[k]>.5&&e>=0)col=[176,196,194];
+      if(layers.lPlate&&c<Nx-1&&r<Ny-1&&(ID[k]!==ID[k+1]||ID[k]!==ID[k+Nx])) col=CL[k]>.05?[164,71,43]:CL[k]<-.05?[63,107,122]:[120,110,100];}
+    const o=k*4;d[o]=col[0];d[o+1]=col[1];d[o+2]=col[2];d[o+3]=255;
+  }
+  rc.putImageData(img,0,0);
+  // 2) scale it up to the screen, then draw contours as smooth lines at screen resolution
+  const W=boxW(),H=boxH(),dpr=Math.min(devicePixelRatio||1,2);
+  mapC.width=Math.round(W*dpr);mapC.height=Math.round(H*dpr);
+  const ctx=mapC.getContext("2d");ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.drawImage(reliefC,0,0,mapC.width,mapC.height);
+  if(!PV){
+    const sx=mapC.width/Nx,sy=mapC.height/Ny;
+    const stroke=(lines,color,w)=>{ctx.strokeStyle=color;ctx.lineWidth=w*dpr;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
+      for(const l of lines){ctx.moveTo(l[0][0]*sx,l[0][1]*sy);for(let i=1;i<l.length;i++)ctx.lineTo(l[i][0]*sx,l[i][1]*sy);}ctx.stroke();};
+    if(layers.lContour){
+      for(const z of ISO) stroke(isolines(z),"rgba(63,95,108,.5)",.8);
+      let mx=-1e9;for(const e of E) if(e>mx&&isFinite(e)) mx=e;
+      const step=landStepFor(pxKm,mx);
+      for(let z=step;z<=mx;z+=step) stroke(isolines(z),z%(step*4)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(step*4)===0?1:.7);
+    }
+    const coast=isolines(0);
+    stroke(coast,"rgba(239,229,207,.7)",3.2);    // paper halo along the shore, like an engraved chart
+    stroke(coast,"#3d2b1c",1.4);
+  }
+  mapC.style.transform="";ovl.style.transform="";
+  drawOverlay();
+  document.getElementById("previewNote").textContent=PV?("途中結果を表示中: "+previewLabel()+"（暗い "+pmin.toFixed(2)+" 〜 明るい "+pmax.toFixed(2)+"）"):"";
+}
+function reliefCol(r,c){
+  const {Nx,Ny,E,pxKm}=grid,e=E[r*Nx+c];let col=e>=0?landCol(e):seaCol(e);
+  if(layers.lShade){
+    const l=E[r*Nx+Math.max(c-1,0)],rr=E[r*Nx+Math.min(c+1,Nx-1)],u=E[Math.max(r-1,0)*Nx+c],dn=E[Math.min(r+1,Ny-1)*Nx+c];
+    const gx=(rr-l)/(2*pxKm),gy=(dn-u)/(2*pxKm);
+    // shading is tuned for the whole-map view; close up, real slopes are steeper, so it is toned down to keep the relief readable
+    const zf=Math.max(1,Math.sqrt(.5/pxKm));
+    const sh=clamp((-gx-gy)/((e>=0?28:60)*zf),-1,1)*(e>=0?.32:.15);
+    col=col.map(v=>v*(1+sh));
+  }
+  return col;
+}
+const riverC=document.createElement("canvas"),maskC=document.createElement("canvas");let maskFor=null;
+function waterMask(w,h){   // opaque where the map shows sea or lake, transparent on land, at screen resolution
+  // the grid is interpolated per pixel and cut at 0 m, the same edge the drawn coastline follows,
+  // so a river stops right at the shore instead of fading half a cell into the water
+  if(maskFor===grid&&maskC.width===w&&maskC.height===h) return maskC;
+  const {Nx,Ny,E,LK}=grid;maskC.width=w;maskC.height=h;const m=maskC.getContext("2d"),im=m.createImageData(w,h),d=im.data;
+  for(let y=0;y<h;y++){const gy=clamp((y+.5)/h*Ny-.5,0,Ny-1),y0=Math.min(Math.floor(gy),Ny-2<0?0:Ny-2),fy=gy-y0,y1=Math.min(y0+1,Ny-1);
+    for(let x=0;x<w;x++){const gx=clamp((x+.5)/w*Nx-.5,0,Nx-1),x0=Math.min(Math.floor(gx),Nx-2<0?0:Nx-2),fx=gx-x0,x1=Math.min(x0+1,Nx-1);
+      const a=y0*Nx+x0,b=y0*Nx+x1,c=y1*Nx+x0,e=y1*Nx+x1;
+      const bl=A=>(A[a]*(1-fx)+A[b]*fx)*(1-fy)+(A[c]*(1-fx)+A[e]*fx)*fy;
+      if(bl(E)<0||(LK&&bl(LK)>.5)) d[(y*w+x)*4+3]=255;}}
+  m.putImageData(im,0,0);maskFor=grid;return maskC;
+}
+const cssVar=n=>getComputedStyle(document.body).getPropertyValue(n);
+function drawOverlay(target){
+  const W=boxW(),H=boxH(),dpr=Math.min(devicePixelRatio||1,2);
+  const cv=target||ovl;
+  if(!target){cv.width=W*dpr;cv.height=H*dpr;}
+  const c=cv.getContext("2d");c.setTransform(dpr,0,0,dpr,0,0);if(!target)c.clearRect(0,0,W,H);
+  if(!grid) return;
+  const sc=W/grid.w,toS=(x,y)=>[(x-grid.cx)*sc+W/2,(y-grid.cy)*sc+H/2];
+  const [ox,oy]=toS(0,0),R=litR*sc,inView=(x,y)=>x>-20&&x<W+20&&y>-20&&y<H+20;
+  if(layers.lLit&&layers.lFog){
+    const g=c.createRadialGradient(ox,oy,R*.92,ox,oy,R*1.6);
+    g.addColorStop(0,"rgba(110,95,80,0)");g.addColorStop(1,"rgba(110,95,80,.38)");
+    c.fillStyle=g;c.fillRect(0,0,W,H);
+  }
+  if(layers.lLit){c.strokeStyle="rgba(61,43,28,.85)";c.lineWidth=1.4;c.setLineDash([6,5]);
+    c.beginPath();c.arc(ox,oy,R,0,6.2832);c.stroke();c.setLineDash([]);}
+  if(layers.lGrid){c.strokeStyle="rgba(61,43,28,.25)";c.lineWidth=1;const RR=layers.lLit?R:1000*sc;for(let f=.25;f<3;f+=.25){c.beginPath();c.arc(ox,oy,RR*f,0,6.2832);c.stroke();}
+    for(let a=0;a<12;a++){const t=a*Math.PI/6;c.beginPath();c.moveTo(ox,oy);c.lineTo(ox+Math.cos(t)*RR*3,oy+Math.sin(t)*RR*3);c.stroke();}}
+  if(layers.lWind&&!grid.PV){
+    const bands=[[.17,1,"貿易風"],[.5,-1,"偏西風"],[.85,1,"極風"]];
+    c.font="600 12px "+cssVar("--display");
+    for(const [f,dir,name] of bands){
+      const rr=R*f;if(rr<6) continue;
+      const n=Math.max(6,Math.min(28,Math.round(rr*2*Math.PI/110)));
+      c.strokeStyle="rgba(63,95,108,.75)";c.fillStyle="rgba(63,95,108,.85)";c.lineWidth=1.3;
+      for(let i=0;i<n;i++){
+        const t=i/n*6.2832,span=.45/n*6.2832*dir;
+        const x2=ox+Math.cos(t+span)*rr,y2=oy+Math.sin(t+span)*rr;
+        if(!inView(x2,y2)) continue;
+        c.beginPath();c.arc(ox,oy,rr,t,t+span,dir<0);c.stroke();
+        const ang=t+span+(dir>0?Math.PI/2:-Math.PI/2);
+        c.beginPath();c.moveTo(x2,y2);c.lineTo(x2-Math.cos(ang-.45)*7,y2-Math.sin(ang-.45)*7);c.lineTo(x2-Math.cos(ang+.45)*7,y2-Math.sin(ang+.45)*7);c.closePath();c.fill();
+      }
+      const lx=ox+Math.cos(-1.1)*rr,ly=oy+Math.sin(-1.1)*rr;
+      if(rr>=45&&lx>0&&lx<W&&ly>0&&ly<H){c.fillStyle="rgba(239,229,207,.85)";const tw=c.measureText(name).width;c.fillRect(lx-3,ly-13,tw+6,17);c.fillStyle="#3f5f6c";c.fillText(name,lx,ly);}
+    }
+  }
+  c.fillStyle="#3d2b1c";c.strokeStyle="#3d2b1c";
+  if(layers.lLit&&inView(ox,oy)){c.lineWidth=1.2;c.beginPath();c.arc(ox,oy,4,0,6.2832);c.stroke();c.beginPath();c.arc(ox,oy,1.4,0,6.2832);c.fill();}
+  c.font="800 13px "+cssVar("--display");
+  const lab=(txt,x,y)=>{if(x<0||x>W||y<0||y>H)return;const tw=c.measureText(txt).width;c.fillStyle="rgba(239,229,207,.8)";c.fillRect(x-tw/2-4,y-13,tw+8,18);c.fillStyle="#3d2b1c";c.fillText(txt,x-tw/2,y);};
+  if(layers.lLit&&R>=30){lab("神々の照らす円",ox,oy-R-6);lab("辺　境",ox,oy-Math.max(R*1.25,R+30));}
+  if(layers.lRiver&&!grid.PV){
+    // rivers go on their own layer, then everything that is sea or lake at the fine resolution is cut away
+    riverC.width=Math.round(W*dpr);riverC.height=Math.round(H*dpr);
+    const rc=riverC.getContext("2d");rc.setTransform(dpr,0,0,dpr,0,0);rc.strokeStyle="#3f6b7a";rc.lineCap="round";
+    for(const [x1,y1,qx,qy,x2,y2,w] of riversOnScreen(toS,W,H)){if((x1<-5&&x2<-5)||(x1>W+5&&x2>W+5)||(y1<-5&&y2<-5)||(y1>H+5&&y2>H+5))continue;
+      rc.lineWidth=Math.min(4.5,.5+1.1*w);rc.beginPath();rc.moveTo(x1,y1);rc.quadraticCurveTo(qx,qy,x2,y2);rc.stroke();}
+    rc.setTransform(1,0,0,1,0,0);rc.globalCompositeOperation="destination-out";rc.imageSmoothingEnabled=true;
+    rc.drawImage(waterMask(riverC.width,riverC.height),0,0);rc.globalCompositeOperation="source-over";
+    c.drawImage(riverC,0,0,W,H);
+  }
+  if(layers.lPins) drawPins(c,toS,W,H);
+  // scale bar
+  const target2=grid.w/5,pow=Math.pow(10,Math.floor(Math.log10(target2)));let km=pow;for(const m of [1,2,5,10]) if(m*pow<=target2) km=m*pow;
+  const L=km*sc,x0=14,y0=H-18;
+  c.fillStyle="rgba(239,229,207,.85)";c.fillRect(x0-6,y0-20,L+76,28);
+  c.strokeStyle="#3d2b1c";c.lineWidth=2;c.beginPath();c.moveTo(x0,y0);c.lineTo(x0+L,y0);c.moveTo(x0,y0-5);c.lineTo(x0,y0+3);c.moveTo(x0+L,y0-5);c.lineTo(x0+L,y0+3);c.stroke();
+  c.font="12px "+cssVar("--mono");c.fillStyle="#3d2b1c";c.fillText(km>=1?km+" km":Math.round(km*1000)+" m",x0+L+6,y0+4);
+}
+function drawHyp(){
+  const cv=document.getElementById("hyp");if(!grid) return;
+  const W=cv.clientWidth||280,H=110,dpr=Math.min(devicePixelRatio||1,2);cv.width=W*dpr;cv.height=H*dpr;
+  const c=cv.getContext("2d");c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,W,H);
+  const lo=-8000,hi=6000,bw=250,nb=(hi-lo)/bw,bins=new Array(nb).fill(0);let land=0;
+  for(const e of grid.E){const b=clamp(Math.floor((e-lo)/bw),0,nb-1);bins[b]++;if(e>=0)land++;}
+  const mx=Math.max(...bins),pw=(W-8)/nb,base=H-18;
+  for(let i=0;i<nb;i++){const h=bins[i]/mx*(base-6);c.fillStyle=lo+i*bw>=0?"#8a6a48":"#5f7f86";c.fillRect(4+i*pw,base-h,Math.max(1,pw-1),h);}
+  c.strokeStyle="#3d2b1c";c.lineWidth=1;const zx=4+(-lo/bw)*pw;c.beginPath();c.moveTo(zx,4);c.lineTo(zx,base);c.stroke();
+  c.font="11px "+cssVar("--mono");c.fillStyle="#6b5440";
+  [[-8000,"−8000m"],[-4000,"−4000"],[0,"0"],[4000,"+4000"]].forEach(([v,t])=>{const x=4+(v-lo)/bw*pw;c.fillText(t,Math.min(x,W-36),H-4);});
+  document.getElementById("hypNote").textContent="陸 "+(100*land/grid.E.length).toFixed(0)+"%・海 "+(100-100*land/grid.E.length).toFixed(0)+"%（地球は陸 約29%）。地球は「陸の高台」と「深い海底」の二つの山になります。";
+}
+
+/* ---------- landmarks & memo (kept in this browser, and in the world file) ---------- */
+const PIN_TYPES={city:"都市",port:"港",castle:"城",tower:"塔",ruin:"遺跡",mark:"目印"};
+let notes={pins:[],memo:""},pinMode="",pinSel=null;
+try{const s=JSON.parse(localStorage.getItem("sf-terrain-notes")||"null");if(s&&Array.isArray(s.pins))notes={pins:s.pins,memo:s.memo||""};}catch(e){}
+function saveNotes(){try{localStorage.setItem("sf-terrain-notes",JSON.stringify(notes));}catch(e){}}
+function glyph(c,t,x,y){
+  c.save();c.translate(x,y);c.strokeStyle="#3d2b1c";c.fillStyle="#3d2b1c";c.lineWidth=1.5;
+  c.fillStyle="rgba(239,229,207,.9)";c.beginPath();c.arc(0,0,9,0,6.2832);c.fill();c.fillStyle="#3d2b1c";
+  if(t==="city"){c.fillRect(-4,-4,8,8);c.beginPath();c.arc(0,0,7,0,6.2832);c.stroke();}
+  else if(t==="port"){c.beginPath();c.moveTo(0,-6);c.lineTo(0,6);c.moveTo(-4,-3);c.lineTo(4,-3);c.moveTo(-6,2);c.quadraticCurveTo(0,9,6,2);c.stroke();}
+  else if(t==="castle"){c.beginPath();c.moveTo(-6,6);c.lineTo(-6,-5);c.lineTo(-3,-5);c.lineTo(-3,-2);c.lineTo(-1,-2);c.lineTo(-1,-5);c.lineTo(1,-5);c.lineTo(1,-2);c.lineTo(3,-2);c.lineTo(3,-5);c.lineTo(6,-5);c.lineTo(6,6);c.closePath();c.fill();}
+  else if(t==="tower"){c.beginPath();c.moveTo(-3,7);c.lineTo(-2,-3);c.lineTo(0,-8);c.lineTo(2,-3);c.lineTo(3,7);c.closePath();c.fill();}
+  else if(t==="ruin"){c.fillRect(-6,-5,3,11);c.fillRect(-1,-1,3,7);c.fillRect(4,2,3,4);c.fillRect(-7,6,14,1.5);}
+  else{c.beginPath();c.moveTo(-5,-5);c.lineTo(5,5);c.moveTo(5,-5);c.lineTo(-5,5);c.stroke();}
+  c.restore();
+}
+function drawPins(c,toS,W,H){
+  c.font="700 12px "+cssVar("--body");
+  for(const p of notes.pins){
+    const [x,y]=toS(p.x,p.y);if(x<-30||x>W+30||y<-30||y>H+30) continue;
+    glyph(c,p.type,x,y);
+    if(pinSel===p.id){c.strokeStyle="#a4472b";c.lineWidth=2;c.beginPath();c.arc(x,y,12,0,6.2832);c.stroke();}
+    if(p.name){const tw=c.measureText(p.name).width;c.fillStyle="rgba(239,229,207,.85)";c.fillRect(x+11,y-8,tw+6,16);c.fillStyle="#3d2b1c";c.fillText(p.name,x+14,y+4);}
+  }
+}
+function screenToWorld(ev){const r=box.getBoundingClientRect();return [view.cx+(ev.clientX-r.left-r.width/2)*view.w/r.width,view.cy+(ev.clientY-r.top-r.height/2)*view.w/r.width];}
+function pinAt(ev){
+  const r=box.getBoundingClientRect(),sc=r.width/view.w;let best=null,bd=14;
+  for(const p of notes.pins){const x=(p.x-view.cx)*sc+r.width/2,y=(p.y-view.cy)*sc+r.height/2,d=Math.hypot(x-(ev.clientX-r.left),y-(ev.clientY-r.top));if(d<bd){bd=d;best=p;}}
+  return best;
+}
+const peType=document.getElementById("peType");
+Object.entries(PIN_TYPES).forEach(([k,v])=>{const o=document.createElement("option");o.value=k;o.textContent=v;peType.appendChild(o);});
+function openPin(p){
+  pinSel=p?p.id:null;const ed=document.getElementById("pinEditor");
+  if(!p){ed.hidden=true;drawOverlay();return;}
+  ed.hidden=false;document.getElementById("memoDrawer").hidden=true;
+  document.getElementById("peTitle").textContent=PIN_TYPES[p.type]||"ランドマーク";
+  document.getElementById("peName").value=p.name||"";peType.value=p.type;document.getElementById("peNote").value=p.note||"";
+  document.getElementById("pePos").textContent="位置 x "+p.x.toFixed(1)+" km, y "+p.y.toFixed(1)+" km（中心から "+Math.hypot(p.x,p.y).toFixed(1)+" km）";
+  drawOverlay();
+}
+document.getElementById("peSave").onclick=()=>{const p=notes.pins.find(q=>q.id===pinSel);if(!p)return;p.name=document.getElementById("peName").value.trim();p.type=peType.value;p.note=document.getElementById("peNote").value;saveNotes();renderPinList();openPin(null);};
+document.getElementById("peDel").onclick=()=>{notes.pins=notes.pins.filter(q=>q.id!==pinSel);saveNotes();renderPinList();openPin(null);};
+document.getElementById("peClose").onclick=()=>openPin(null);
+function renderPinList(){
+  const ul=document.getElementById("pinList");
+  if(!notes.pins.length){ul.innerHTML='<li class="note">まだありません。</li>';return;}
+  ul.innerHTML=notes.pins.map(p=>'<li><button type="button" data-go="'+p.id+'">'+esc(p.name||"（名前なし）")+'</button><span class="k">'+(PIN_TYPES[p.type]||"")+" · "+Math.round(Math.hypot(p.x,p.y)).toLocaleString()+' km</span></li>').join("");
+}
+document.getElementById("pinList").addEventListener("click",ev=>{const b=ev.target.closest("[data-go]");if(!b)return;const p=notes.pins.find(q=>q.id===b.dataset.go);if(!p)return;
+  view.cx=p.x;view.cy=p.y;view.w=Math.min(view.w,120);openPin(p);render();});
+document.getElementById("pinbar").addEventListener("click",ev=>{const b=ev.target.closest("[data-mode]");if(!b)return;pinMode=b.dataset.mode;
+  document.querySelectorAll("#pinbar button").forEach(x=>x.classList.toggle("on",x===b));box.classList.toggle("placing",!!pinMode);});
+const memoEl=document.getElementById("worldMemo");memoEl.value=notes.memo;
+memoEl.addEventListener("input",()=>{notes.memo=memoEl.value;saveNotes();});
+document.getElementById("memoBtn").onclick=()=>{const d=document.getElementById("memoDrawer");d.hidden=!d.hidden;if(!d.hidden){document.getElementById("pinEditor").hidden=true;memoEl.focus();}};
+document.getElementById("memoClose").onclick=()=>{document.getElementById("memoDrawer").hidden=true;};
+function onMapClick(ev){
+  if(pinMode){
+    const [x,y]=screenToWorld(ev);
+    const p={id:"p"+Date.now().toString(36)+Math.floor(Math.random()*1e4),type:pinMode,x:Math.round(x*100)/100,y:Math.round(y*100)/100,name:"",note:""};
+    notes.pins.push(p);saveNotes();renderPinList();openPin(p);document.getElementById("peName").focus();return;
+  }
+  const p=pinAt(ev);openPin(p);
+}
+renderPinList();
+
+/* ---------- probe ---------- */
+function classify(e){
+  if(e>=2000) return "山地";if(e>=200) return "丘陵・高台";if(e>=0) return "低地";
+  if(e>-250) return "大陸棚（浅い海）";if(e>-3000) return "大陸斜面";if(e>-6000) return "深海平原";return "海溝";
+}
+let probeT=0;
+box.addEventListener("pointermove",ev=>{
+  if(drag||ev.target.closest(".drawer,.pinbar,.mapctl")) return;
+  const now=performance.now();if(now-probeT<40) return;probeT=now;
+  const [x,y]=screenToWorld(ev);
+  let pl;try{pl=plan();}catch(e){return;}
+  lib.pxKm=view.w/460;
+  let res;try{res=makeEval(pl)(x,y);}catch(e){return;}
+  const ins=pl.steps[pl.outIdx].ins,e=val(res,ins[0]),dist=Math.hypot(x,y);
+  const ang=(Math.atan2(y,x)*180/Math.PI+360)%360;
+  const rows=[["標高・水深",(e>=0?"+":"−")+Math.abs(Math.round(e)).toLocaleString()+" m"],["地形",classify(e)],
+    ["位置","x "+x.toFixed(1)+" / y "+y.toFixed(1)+" km"],["中心から",Math.round(dist).toLocaleString()+" km"],["方角",Math.round(ang)+"°"]];
+  if(layers.lLit) rows.push(["場所",dist<=litR?"照らされた世界":"辺境"]);
+  if(preview){const k=pl.steps.findIndex(s=>s.n.id===preview.id);if(k>=0) rows.push([previewLabel(),(+res[k][preview.port]||0).toFixed(3)]);}
+  document.getElementById("probe").innerHTML=rows.map(([a,b])=>"<dt>"+a+"</dt><dd>"+b+"</dd>").join("");
+});
+
+/* ---------- pan, zoom, maximize ---------- */
+let drag=null;
+box.addEventListener("pointerdown",ev=>{if(ev.target.closest(".mapctl,.drawer,.pinbar"))return;drag={x:ev.clientX,y:ev.clientY,dx:0,dy:0};box.setPointerCapture(ev.pointerId);box.classList.add("drag");});
+box.addEventListener("pointermove",ev=>{if(!drag)return;drag.dx=ev.clientX-drag.x;drag.dy=ev.clientY-drag.y;if(pinMode&&Math.abs(drag.dx)+Math.abs(drag.dy)<4)return;const t="translate("+drag.dx+"px,"+drag.dy+"px)";mapC.style.transform=t;ovl.style.transform=t;});
+const endDrag=ev=>{if(!drag)return;const k=view.w/boxW();
+  if(Math.abs(drag.dx)+Math.abs(drag.dy)>4){view.cx-=drag.dx*k;view.cy-=drag.dy*k;render();}
+  else{mapC.style.transform="";ovl.style.transform="";if(ev.type==="pointerup")onMapClick(ev);}
+  drag=null;box.classList.remove("drag");};
+box.addEventListener("pointerup",endDrag);box.addEventListener("pointercancel",endDrag);
+let wheelT=0;
+box.addEventListener("wheel",ev=>{if(ev.target.closest(".drawer"))return;ev.preventDefault();const f=ev.deltaY>0?1.25:.8;zoomAt(f,ev);},{passive:false});
+function zoomAt(f,ev){
+  const r=box.getBoundingClientRect();let sx=r.width/2,sy=r.height/2;if(ev){sx=ev.clientX-r.left;sy=ev.clientY-r.top;}
+  const k=view.w/r.width,x=view.cx+(sx-r.width/2)*k,y=view.cy+(sy-r.height/2)*k;
+  view.w=clamp(view.w*f,2,200000);const k2=view.w/r.width;view.cx=x-(sx-r.width/2)*k2;view.cy=y-(sy-r.height/2)*k2;
+  clearTimeout(wheelT);wheelT=setTimeout(render,120);
+}
+document.getElementById("zin").onclick=()=>zoomAt(.5);
+document.getElementById("zout").onclick=()=>zoomAt(2);
+document.getElementById("home").onclick=()=>{view.cx=0;view.cy=0;view.w=litR*2.6;render();};
+function setMax(on){box.classList.toggle("max",on);document.body.classList.toggle("maxed",on);document.getElementById("maxBtn").textContent=on?"⤡":"⤢";
+  document.getElementById("maxBtn").setAttribute("aria-label",on?"最大化をやめる":"地図を最大化");render();}
+document.getElementById("maxBtn").onclick=()=>setMax(!box.classList.contains("max"));
+document.addEventListener("keydown",ev=>{if(ev.key==="Escape"&&box.classList.contains("max"))setMax(false);});
+const litEl=document.getElementById("litR"),litV=document.getElementById("litRv");
+const setLit=()=>{litR=+litEl.value;lib.litR=litR;litV.textContent=litR.toLocaleString()+" km";};
+litEl.addEventListener("input",()=>{setLit();drawOverlay();});litEl.addEventListener("change",render);setLit();
+view.w=litR*2.6;
+
+/* ---------- export ---------- */
+let dl=null;
+if(window.claude&&window.claude.use){window.claude.use("downloads").then(d=>{dl=d;}).catch(()=>{});}
+async function saveFile(name,data){
+  const note=document.getElementById("exNote");
+  if(dl){
+    try{await dl.save({filename:name,data});note.textContent=name+" を保存しました。";}
+    catch(e){note.textContent=e&&e.code==="declined"?"保存を取りやめました。":"保存できませんでした（"+(e&&e.code||"不明")+"）。";}
+    return;
+  }
+  try{ // opened as a downloaded file
+    const blob=data instanceof Blob?data:new Blob([data]);const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);note.textContent=name+" を書き出しました。";
+  }catch(e){note.textContent="このページからは保存できません。";}
+}
+const stamp=()=>{const d=new Date(),p=n=>String(n).padStart(2,"0");return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes());};
+document.getElementById("exPng").onclick=()=>{
+  if(!grid) return;
+  const W=boxW(),H=boxH(),dpr=Math.min(devicePixelRatio||1,2),cv=document.createElement("canvas");cv.width=W*dpr;cv.height=H*dpr;
+  const c=cv.getContext("2d");c.imageSmoothingEnabled=true;c.drawImage(mapC,0,0,cv.width,cv.height);
+  drawOverlay(cv);
+  cv.toBlob(b=>{if(b)saveFile("silverfall-map-"+stamp()+".png",b);},"image/png");
+};
+/* SVG: marching squares over the grid, segments joined into polylines; relief kept as an embedded image layer */
+function isolines(t){
+  const {Nx,Ny,E}=grid,seg=[];
+  const P=(r,c,r2,c2)=>{const a=E[r*Nx+c],b=E[r2*Nx+c2],f=(t-a)/(b-a);return [c+.5+(c2-c)*f,r+.5+(r2-r)*f];};
+  for(let r=0;r<Ny-1;r++)for(let c=0;c<Nx-1;c++){
+    const a=E[r*Nx+c]>=t,b=E[r*Nx+c+1]>=t,d=E[(r+1)*Nx+c]>=t,e=E[(r+1)*Nx+c+1]>=t;
+    const code=(a?8:0)|(b?4:0)|(e?2:0)|(d?1:0);if(code===0||code===15) continue;
+    const T=()=>P(r,c,r,c+1),R=()=>P(r,c+1,r+1,c+1),B=()=>P(r+1,c,r+1,c+1),L=()=>P(r,c,r+1,c);
+    switch(code){
+      case 1:case 14:seg.push([L(),B()]);break; case 2:case 13:seg.push([B(),R()]);break;
+      case 3:case 12:seg.push([L(),R()]);break; case 4:case 11:seg.push([T(),R()]);break;
+      case 6:case 9:seg.push([T(),B()]);break; case 7:case 8:seg.push([L(),T()]);break;
+      case 5:seg.push([L(),T()],[B(),R()]);break; case 10:seg.push([T(),R()],[L(),B()]);break;
+    }
+  }
+  // join segments that share an end into longer lines
+  const key=p=>p[0].toFixed(3)+","+p[1].toFixed(3),ends=new Map(),used=new Uint8Array(seg.length);
+  seg.forEach((s,i)=>{for(const p of s){const k=key(p);(ends.get(k)||ends.set(k,[]).get(k)).push(i);}});
+  const lines=[];
+  for(let i=0;i<seg.length;i++){
+    if(used[i]) continue;used[i]=1;const line=[seg[i][0],seg[i][1]];
+    for(const dir of [1,0]){
+      for(;;){const tip=dir?line[line.length-1]:line[0],cand=(ends.get(key(tip))||[]).find(j=>!used[j]);if(cand==null)break;used[cand]=1;
+        const s2=seg[cand],nxt=key(s2[0])===key(tip)?s2[1]:s2[0];if(dir)line.push(nxt);else line.unshift(nxt);}
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+function exportSvg(){
+  const {Nx,Ny,E,pxKm}=grid,W=boxW(),H=boxH(),sx=W/Nx,sy=H/Ny;
+  const pathOf=lines=>lines.map(l=>"M"+l.map(p=>(p[0]*sx).toFixed(1)+" "+(p[1]*sy).toFixed(1)).join("L")).join("");
+  let mx=-1e9;for(const e of E) if(e>mx&&isFinite(e)) mx=e;
+  const landStep=landStepFor(pxKm,mx);
+  // relief image
+  const cv=document.createElement("canvas");cv.width=Nx;cv.height=Ny;const c=cv.getContext("2d"),img=c.createImageData(Nx,Ny);
+  for(let r=0;r<Ny;r++)for(let q=0;q<Nx;q++){const col=reliefCol(r,q),o=(r*Nx+q)*4;img.data[o]=col[0];img.data[o+1]=col[1];img.data[o+2]=col[2];img.data[o+3]=255;}
+  c.putImageData(img,0,0);
+  const out=[];
+  out.push('<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">');
+  out.push('<desc>Silver Fall terrain. 1 unit = '+(grid.w/W).toFixed(4)+' km. view centre x='+grid.cx.toFixed(2)+' km, y='+grid.cy.toFixed(2)+' km. contour '+landStep+' m on land; isobaths '+ISO.join(", ")+' m.</desc>');
+  out.push('<g id="relief" inkscape:groupmode="layer" inkscape:label="起伏（画像）"><image width="'+W+'" height="'+H+'" preserveAspectRatio="none" href="'+cv.toDataURL("image/png")+'"/></g>');
+  out.push('<g id="isobaths" inkscape:groupmode="layer" inkscape:label="等深線" fill="none" stroke="#3f5f6c" stroke-opacity=".55" stroke-width=".8">');
+  for(const z of ISO){const ls=isolines(z);if(ls.length) out.push('<path data-depth="'+z+'" d="'+pathOf(ls)+'"/>');}
+  out.push('</g><g id="contours" inkscape:groupmode="layer" inkscape:label="等高線" fill="none" stroke="#3d2b1c" stroke-opacity=".45" stroke-width=".7">');
+  for(let z=landStep;z<=mx;z+=landStep){const ls=isolines(z);if(ls.length) out.push('<path data-elev="'+z+'" d="'+pathOf(ls)+'"/>');}
+  out.push('</g><g id="coast" inkscape:groupmode="layer" inkscape:label="海岸線" fill="none" stroke="#3d2b1c" stroke-width="1.6" stroke-linejoin="round"><path d="'+pathOf(isolines(0))+'"/></g>');
+  const sc=W/grid.w,toS=(x,y)=>[(x-grid.cx)*sc+W/2,(y-grid.cy)*sc+H/2],[ox,oy]=toS(0,0);
+  if(layers.lRiver){const parts=[];for(const [x1,y1,qx,qy,x2,y2,w] of riversOnScreen(toS,W,H)){
+      parts.push('<path d="M'+x1.toFixed(1)+' '+y1.toFixed(1)+'Q'+qx.toFixed(1)+' '+qy.toFixed(1)+' '+x2.toFixed(1)+' '+y2.toFixed(1)+'" stroke-width="'+Math.min(4.5,.5+1.1*w).toFixed(2)+'"/>');}
+    if(parts.length){
+      const mc=document.createElement("canvas");mc.width=Nx;mc.height=Ny;const mx2=mc.getContext("2d"),mi=mx2.createImageData(Nx,Ny);
+      for(let k=0;k<Nx*Ny;k++){const land=E[k]>=0&&!(grid.LK&&grid.LK[k]>.5)?255:0;mi.data[k*4]=mi.data[k*4+1]=mi.data[k*4+2]=land;mi.data[k*4+3]=255;}
+      mx2.putImageData(mi,0,0);
+      out.push('<mask id="landmask" maskUnits="userSpaceOnUse" x="0" y="0" width="'+W+'" height="'+H+'"><image width="'+W+'" height="'+H+'" preserveAspectRatio="none" href="'+mc.toDataURL("image/png")+'"/></mask>');
+      out.push('<g id="rivers" inkscape:groupmode="layer" inkscape:label="川" fill="none" stroke="#3f6b7a" stroke-linecap="round" mask="url(#landmask)">'+parts.join("")+'</g>');}}
+  if(layers.lLit) out.push('<g id="lit" inkscape:groupmode="layer" inkscape:label="神々の照らす円"><circle cx="'+ox.toFixed(1)+'" cy="'+oy.toFixed(1)+'" r="'+(litR*sc).toFixed(1)+'" fill="none" stroke="#3d2b1c" stroke-width="1.4" stroke-dasharray="6 5"/></g>');
+  if(layers.lPins&&notes.pins.length){
+    out.push('<g id="landmarks" inkscape:groupmode="layer" inkscape:label="ランドマーク" font-family="BIZ UDPGothic, sans-serif" font-size="12" font-weight="700" fill="#3d2b1c">');
+    for(const p of notes.pins){const [x,y]=toS(p.x,p.y);if(x<-20||x>W+20||y<-20||y>H+20) continue;
+      out.push('<g data-type="'+p.type+'" data-x-km="'+p.x+'" data-y-km="'+p.y+'"><circle cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="5" fill="#efe5cf" stroke="#3d2b1c" stroke-width="1.5"/><text x="'+(x+9).toFixed(1)+'" y="'+(y+4).toFixed(1)+'">'+esc((PIN_TYPES[p.type]||"")+(p.name?"　"+p.name:""))+'</text>'+(p.note?'<title>'+esc(p.note)+'</title>':'')+'</g>');}
+    out.push('</g>');
+  }
+  const target=grid.w/5,pow=Math.pow(10,Math.floor(Math.log10(target)));let km=pow;for(const m of [1,2,5,10]) if(m*pow<=target) km=m*pow;
+  const L=km*sc;
+  out.push('<g id="scale" inkscape:groupmode="layer" inkscape:label="縮尺"><path d="M14 '+(H-18)+'h'+L.toFixed(1)+'M14 '+(H-23)+'v8M'+(14+L).toFixed(1)+' '+(H-23)+'v8" stroke="#3d2b1c" stroke-width="2"/><text x="'+(20+L).toFixed(1)+'" y="'+(H-14)+'" font-family="IBM Plex Mono, monospace" font-size="12" fill="#3d2b1c">'+(km>=1?km+" km":Math.round(km*1000)+" m")+'</text></g>');
+  out.push('</svg>');
+  saveFile("silverfall-map-"+stamp()+".svg",out.join("\n"));
+}
+function meta(){return {originKm:{x:grid.cx-grid.w/2,y:grid.cy-grid.h/2},pxKm:grid.pxKm,width:grid.Nx,height:grid.Ny,unit:"m",note:"x は東向き、y は南向き（地図の下方向）の km。各値はマスの中心の標高"};}
+document.getElementById("exSvg").onclick=()=>{if(grid&&!grid.PV)exportSvg();else document.getElementById("exNote").textContent="途中結果の表示を外してから書き出してください。";};
+document.getElementById("exCsv").onclick=()=>{
+  if(!grid) return;const m=meta(),lines=["# Silver Fall elevation (m). origin x="+m.originKm.x.toFixed(3)+" km, y="+m.originKm.y.toFixed(3)+" km, cell="+m.pxKm.toFixed(4)+" km, "+m.width+"x"+m.height];
+  for(let r=0;r<grid.Ny;r++){const row=[];for(let c=0;c<grid.Nx;c++)row.push(Math.round(grid.E[r*grid.Nx+c]));lines.push(row.join(","));}
+  saveFile("silverfall-elevation-"+stamp()+".csv",lines.join("\n"));
+};
+document.getElementById("exJson").onclick=()=>{
+  if(!grid) return;const m=meta();m.format="silverfall-elevation-v1";m.elevation=Array.from(grid.E,v=>Math.round(v));
+  saveFile("silverfall-elevation-"+stamp()+".json",JSON.stringify(m));
+};
+document.getElementById("exWorld").onclick=()=>{
+  saveFile("silverfall-world-"+stamp()+".json",JSON.stringify({format:"silverfall-world-v1",graph:G2,uid,litR,loopCount,view,pins:notes.pins,memo:notes.memo},null,1));
+};
+document.getElementById("imWorld").addEventListener("change",ev=>{
+  const f=ev.target.files&&ev.target.files[0];if(!f)return;
+  f.text().then(t=>{
+    const s=JSON.parse(t);if(!s||s.format!=="silverfall-world-v1"||!s.graph||!Array.isArray(s.graph.nodes)) throw new Error("形式が違います");
+    G2=s.graph;upgradeGraph(G2);uid=s.uid||200;compiled.clear();preview=null;
+    if(s.litR){litEl.value=s.litR;setLit();}
+    if(s.loopCount){loopCount=s.loopCount;document.getElementById("loopN").value=loopCount;}
+    if(s.view){Object.assign(view,s.view);}
+    notes={pins:Array.isArray(s.pins)?s.pins:[],memo:s.memo||""};memoEl.value=notes.memo;
+    save();saveNotes();renderPinList();sel=null;select(null);drawBoard();render();
+    document.getElementById("exNote").textContent=f.name+" を読み込みました。";
+  }).catch(e=>{document.getElementById("exNote").textContent="読み込めませんでした: "+e.message;});
+  ev.target.value="";
+});
+
+/* ---------- node board ---------- */
+const board=document.getElementById("board"),wires=document.getElementById("wires"),bench=document.getElementById("bench");
+const addSel=document.getElementById("addType");
+Object.entries(TYPES).forEach(([k,T])=>{if(k==="output")return;const o=document.createElement("option");o.value=k;o.textContent=T.name;addSel.appendChild(o);});
+{const o=document.createElement("option");o.value="__iceLoop";o.textContent="循環の例をつなぐ（氷床⇄沈み込み、出力の手前）";addSel.appendChild(o);}
+let orderMap={};
+function drawBoard(){
+  try{const pl=plan();orderMap={};pl.steps.forEach((s,i)=>orderMap[s.n.id]=i+1);}catch(e){orderMap={};}
+  board.querySelectorAll(".node").forEach(n=>n.remove());
+  board.style.width=Math.max(900,...G2.nodes.map(n=>n.x+240))+"px";
+  board.style.height=Math.max(380,...G2.nodes.map(n=>n.y+260))+"px";
+  for(const n of G2.nodes){
+    const el=document.createElement("div");el.className="node"+(sel===n.id?" sel":"");el.dataset.id=n.id;
+    el.style.left=n.x+"px";el.style.top=n.y+"px";
+    const rows=Math.max(n.ins.length,n.outs.length);
+    let ports="";
+    for(let i=0;i<rows;i++){
+      const a=n.ins[i],b=n.outs[i];
+      const ain=a!=null&&G2.wires.some(w=>w.to===n.id&&w.tp===a);
+      const bon=b!=null&&G2.wires.some(w=>w.from===n.id&&w.fp===b);
+      const pv=b!=null&&preview&&preview.id===n.id&&preview.port===b;
+      ports+='<div class="pin">'+(a!=null?'<span class="dot'+(ain?" on":"")+'" data-in="'+esc(a)+'" title="クリックで線を外す"></span>'+esc(a):"")+'</div>';
+      ports+='<div class="pout">'+(b!=null?'<button type="button" class="eye'+(pv?" on":"")+'" data-eye="'+esc(b)+'" title="地図に映す">'+(pv?"見中":"見る")+'</button>'+esc(b)+'<span class="dot'+(bon?" on":"")+'" data-out="'+esc(b)+'"></span>':"")+'</div>';
+    }
+    el.innerHTML='<div class="nh"><span><span class="order">'+(orderMap[n.id]?orderMap[n.id]+".":"—")+'</span>'+esc(n.name)+'</span><span class="sd">'+(n.type==="output"?"":"seed "+n.seed)+'</span></div><div class="ports">'+ports+'</div>';
+    board.appendChild(el);
+  }
+  drawWires();
+}
+function portPos(id,port,dir){
+  const el=board.querySelector('.node[data-id="'+id+'"]');if(!el) return null;
+  const d=el.querySelector('[data-'+dir+'="'+CSS.escape(port)+'"]');if(!d) return null;
+  const br=board.getBoundingClientRect(),r=d.getBoundingClientRect();
+  return [r.left+r.width/2-br.left,r.top+r.height/2-br.top];
+}
+let tempWire=null;
+function drawWires(){
+  let s="";
+  try{const A=analyse(false),br=board.getBoundingClientRect();
+    A.comps.forEach((c,i)=>{if(!A.loop[i])return;let x1=1e9,y1=1e9,x2=-1e9,y2=-1e9;
+      c.forEach(id=>{const el=board.querySelector('.node[data-id="'+id+'"]');if(!el)return;const r=el.getBoundingClientRect();
+        x1=Math.min(x1,r.left-br.left);y1=Math.min(y1,r.top-br.top);x2=Math.max(x2,r.right-br.left);y2=Math.max(y2,r.bottom-br.top);});
+      if(x1>x2)return;
+      s+='<rect x="'+(x1-10)+'" y="'+(y1-22)+'" width="'+(x2-x1+20)+'" height="'+(y2-y1+32)+'" rx="6" style="fill:rgba(164,71,43,.06);stroke:#a4472b;stroke-dasharray:6 4;stroke-width:1.5"/>';
+      s+='<text x="'+(x1-4)+'" y="'+(y1-8)+'" style="fill:#a4472b;font:600 12px var(--body)">循環 ×'+loopCount+'（同じ列）</text>';});
+  }catch(e){}
+  for(const w of G2.wires){
+    const a=portPos(w.from,w.fp,"out"),b=portPos(w.to,w.tp,"in");if(!a||!b) continue;
+    const dx=Math.max(40,(b[0]-a[0])/2);
+    s+='<path d="M'+a[0]+","+a[1]+" C"+(a[0]+dx)+","+a[1]+" "+(b[0]-dx)+","+b[1]+" "+b[0]+","+b[1]+'"/>';
+  }
+  if(tempWire){const [a,b]=tempWire;const dx=Math.max(40,Math.abs(b[0]-a[0])/2);s+='<path class="temp" d="M'+a[0]+","+a[1]+" C"+(a[0]+dx)+","+a[1]+" "+(b[0]-dx)+","+b[1]+" "+b[0]+","+b[1]+'"/>';}
+  wires.innerHTML=s;
+}
+let nodeDrag=null,wireDrag=null;
+board.addEventListener("pointerdown",ev=>{
+  const nodeEl=ev.target.closest(".node");if(!nodeEl) return;
+  const id=nodeEl.dataset.id,n=G2.nodes.find(q=>q.id===id);
+  const eye=ev.target.closest("[data-eye]");
+  if(eye){ev.preventDefault();const p=eye.dataset.eye;preview=(preview&&preview.id===id&&preview.port===p)?null:{id,port:p};drawBoard();render();return;}
+  const out=ev.target.closest("[data-out]");
+  if(out){ev.preventDefault();const p=portPos(id,out.dataset.out,"out");wireDrag={from:id,fp:out.dataset.out,start:p};board.setPointerCapture(ev.pointerId);return;}
+  const inn=ev.target.closest("[data-in]");
+  if(inn){ev.preventDefault();const before=G2.wires.length;G2.wires=G2.wires.filter(w=>!(w.to===id&&w.tp===inn.dataset.in));if(G2.wires.length!==before){save();drawBoard();render();}return;}
+  if(ev.target.closest(".nh")){ev.preventDefault();nodeDrag={id,n,sx:ev.clientX,sy:ev.clientY,x0:n.x,y0:n.y,moved:false};board.setPointerCapture(ev.pointerId);}
+  select(id);
+});
+board.addEventListener("pointermove",ev=>{
+  if(nodeDrag){const n=nodeDrag.n;n.x=Math.max(0,nodeDrag.x0+ev.clientX-nodeDrag.sx);n.y=Math.max(0,nodeDrag.y0+ev.clientY-nodeDrag.sy);nodeDrag.moved=true;
+    const el=board.querySelector('.node[data-id="'+n.id+'"]');el.style.left=n.x+"px";el.style.top=n.y+"px";drawWires();}
+  if(wireDrag){const br=board.getBoundingClientRect();tempWire=[wireDrag.start,[ev.clientX-br.left,ev.clientY-br.top]];drawWires();}
+});
+board.addEventListener("pointerup",ev=>{
+  if(nodeDrag){if(nodeDrag.moved)save();nodeDrag=null;}
+  if(wireDrag){
+    const t=document.elementFromPoint(ev.clientX,ev.clientY);const inn=t&&t.closest&&t.closest("[data-in]");
+    if(inn){const to=inn.closest(".node").dataset.id;
+      if(to!==wireDrag.from){G2.wires=G2.wires.filter(w=>!(w.to===to&&w.tp===inn.dataset.in));G2.wires.push({from:wireDrag.from,fp:wireDrag.fp,to,tp:inn.dataset.in});save();}}
+    wireDrag=null;tempWire=null;drawBoard();render();
+  }
+});
+function markBad(id){board.querySelectorAll(".node").forEach(el=>el.classList.toggle("bad",el.dataset.id===id));}
+
+/* ---------- inspector ---------- */
+const $=id=>document.getElementById(id);
+function select(id){
+  sel=id;board.querySelectorAll(".node").forEach(el=>el.classList.toggle("sel",el.dataset.id===id));
+  const n=G2.nodes.find(q=>q.id===id);if(!n){$("inspBody").hidden=true;$("inspTitle").textContent="ノードを選ぶと、ここで中身を編集できます";return;}
+  $("inspBody").hidden=false;$("inspTitle").textContent=n.name;
+  $("iName").value=n.name;$("iSeed").value=n.seed;$("iIn").value=n.ins.join(", ");$("iOut").value=n.outs.join(", ");$("iCode").value=n.code;$("iErr").textContent="";
+  $("iDel").hidden=n.type==="output";$("iSeed").disabled=n.type==="output";$("iDice").disabled=n.type==="output";
+  const T=TYPES[n.type];const specs=(T?T.params:[]).filter(q=>q.k in n.params);
+  Object.keys(n.params).forEach(k=>{if(!specs.find(q=>q.k===k)) specs.push({k,l:k,min:-10,max:10,step:.01});});
+  $("iParams").innerHTML=specs.map(q=>'<div class="field"><div class="fh"><label for="pp_'+q.k+'">'+esc(q.l)+'</label><span id="pv_'+q.k+'">'+n.params[q.k]+'</span></div><input type="range" id="pp_'+q.k+'" data-k="'+q.k+'" min="'+q.min+'" max="'+q.max+'" step="'+q.step+'" value="'+n.params[q.k]+'"></div>').join("");
+  $("iParams").querySelectorAll("input").forEach(inp=>{
+    inp.addEventListener("input",()=>{$("pv_"+inp.dataset.k).textContent=inp.value;});
+    inp.addEventListener("change",()=>{n.params[inp.dataset.k]=+inp.value;save();render();});
+  });
+}
+$("iDice").onclick=()=>{const n=G2.nodes.find(q=>q.id===sel);if(!n)return;n.seed=Math.floor(Math.random()*1e6);$("iSeed").value=n.seed;save();drawBoard();render();};
+$("iSeed").addEventListener("change",()=>{const n=G2.nodes.find(q=>q.id===sel);if(!n)return;n.seed=Math.floor(+$("iSeed").value)||0;save();drawBoard();render();});
+$("iApply").onclick=()=>{
+  const n=G2.nodes.find(q=>q.id===sel);if(!n)return;
+  const split=s=>s.split(/[,、\s]+/).map(t=>t.trim()).filter(Boolean);
+  const code=$("iCode").value;
+  if(code!==n.code){
+    try{const fn=(new Function("return ("+code+")"))();if(typeof fn!=="function") throw new Error("関数になっていません");}
+    catch(e){$("iErr").textContent=e instanceof EvalError?"このページでは処理の書き換えが使えません（ブラウザが禁止）。":"処理の書き間違い: "+e.message;return;}
+  }
+  // a renamed port keeps its wires: a name that disappeared hands them to the new name in the same slot
+  const remap=(oldL,newL)=>{const m={};oldL.forEach((p,i)=>{if(!newL.includes(p)&&i<newL.length&&!oldL.includes(newL[i])) m[p]=newL[i];});return m;};
+  const nIn=split($("iIn").value),nOut=split($("iOut").value),mIn=remap(n.ins,nIn),mOut=remap(n.outs,nOut);
+  for(const w of G2.wires){if(w.to===n.id&&mIn[w.tp]) w.tp=mIn[w.tp];if(w.from===n.id&&mOut[w.fp]) w.fp=mOut[w.fp];}
+  if(preview&&preview.id===n.id&&mOut[preview.port]) preview.port=mOut[preview.port];
+  n.name=$("iName").value.trim()||n.name;n.code=code;n.ins=nIn;n.outs=nOut;
+  G2.wires=G2.wires.filter(w=>{const a=G2.nodes.find(q=>q.id===w.from),b=G2.nodes.find(q=>q.id===w.to);return a&&b&&a.outs.includes(w.fp)&&b.ins.includes(w.tp);});
+  if(preview&&preview.id===n.id&&!n.outs.includes(preview.port)) preview=null;
+  $("iErr").textContent="";$("inspTitle").textContent=n.name;save();drawBoard();render();
+};
+$("iDel").onclick=()=>{
+  const n=G2.nodes.find(q=>q.id===sel);if(!n||n.type==="output")return;
+  G2.nodes=G2.nodes.filter(q=>q.id!==n.id);G2.wires=G2.wires.filter(w=>w.from!==n.id&&w.to!==n.id);
+  if(preview&&preview.id===n.id) preview=null;sel=null;select(null);save();drawBoard();render();
+};
+$("addNode").onclick=()=>{
+  const sl=bench.scrollLeft,st=bench.scrollTop;
+  if(addSel.value==="__iceLoop"){
+    const out=G2.nodes.find(n=>n.type==="output");const w=G2.wires.find(w=>w.to===out.id&&w.tp==="e");
+    const a=mkNode("load",0,0),b=mkNode("ice",0,40);G2.nodes.push(a,b);
+    G2.wires=G2.wires.filter(q=>q!==w);
+    if(w) G2.wires.push({from:w.from,fp:w.fp,to:a.id,tp:"e"});
+    G2.wires.push({from:b.id,fp:"ice",to:a.id,tp:"ice"},{from:a.id,fp:"surface",to:b.id,tp:"surface"},{from:a.id,fp:"e",to:out.id,tp:"e"});
+    autoLayout();save();drawBoard();select(a.id);render();return;
+  }
+  const n=mkNode(addSel.value,sl+40+Math.random()*60,st+380+Math.random()*60);
+  G2.nodes.push(n);save();drawBoard();select(n.id);
+};
+$("rollAll").onclick=()=>{G2.nodes.forEach(n=>{if(n.type!=="output")n.seed=Math.floor(Math.random()*1e6);});save();drawBoard();if(sel)select(sel);render();};
+$("arrange").onclick=()=>{autoLayout();save();drawBoard();};
+$("loopN").addEventListener("change",()=>{loopCount=clamp(Math.round(+$("loopN").value)||1,1,30);$("loopN").value=loopCount;drawWires();render();});
+$("resetGraph").onclick=()=>{G2=defaultGraph();autoLayout();preview=null;compiled.clear();sel=null;select(null);save();drawBoard();render();};
+function previewLabel(){if(!preview)return"";const n=G2.nodes.find(q=>q.id===preview.id);return (n?n.name:"")+" → "+preview.port;}
+
+window.addEventListener("resize",()=>{clearTimeout(wheelT);wheelT=setTimeout(()=>{render();drawWires();},200);});
+drawBoard();
+poolStart();
+render();
+})();
+</script>
+</html>
