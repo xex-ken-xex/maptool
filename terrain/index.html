@@ -426,7 +426,7 @@ load:{name:"氷の重みで沈む（循環の例）",ins:["e","ice"],outs:["surf
   return {surface:bed+inp.ice,e:bed+inp.ice};
  }},
 rivers:{name:"川と侵食（区画）",region:true,ins:["e"],outs:["e","river","lake"],
- params:[{k:"cellKm",l:"升目の大きさ km",min:2,max:40,step:1,v:10},{k:"strength",l:"削る強さ",min:0,max:.2,step:.002,v:.03},{k:"rain",l:"雨の量（倍）",min:.1,max:3,step:.05,v:1},{k:"minArea",l:"川として描く集水面積 km²",min:200,max:50000,step:100,v:4000},{k:"lakeDepth",l:"湖になる窪地の深さ m",min:1,max:800,step:1,v:180},{k:"lakeCells",l:"湖になる広さ（升目の数）",min:1,max:400,step:1,v:25}],
+ params:[{k:"cellKm",l:"升目の大きさ km",min:1,max:40,step:1,v:10},{k:"strength",l:"削る強さ",min:0,max:.2,step:.002,v:.03},{k:"rain",l:"雨の量（倍）",min:.1,max:3,step:.05,v:1},{k:"minArea",l:"川として描く集水面積 km²",min:200,max:50000,step:100,v:4000},{k:"lakeDepth",l:"湖になる窪地の深さ m",min:1,max:800,step:1,v:180},{k:"lakeCells",l:"湖になる広さ（升目の数）",min:1,max:400,step:1,v:25}],
  fn:function(H,n,ckm,p,seed,lib,at){
   // 区画ノード: H は周りの升目も含めた n×n の標高（m）、ckm は升目の大きさ（km）。at.x0, at.y0 は左上の升目の世界での番号。
   // 返り値: delta（標高の変化）, area（集水面積 km²）, recv（水が流れていく先の升目）, lake（湖なら1）, level（湖の水面の標高 m）
