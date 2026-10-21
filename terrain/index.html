@@ -1,6 +1,5 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Silver Fall 地形工房</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -232,8 +231,10 @@ body.maxed{overflow:hidden}
         <button type="button" id="exWorld">世界の設定を保存（JSON）</button>
         <label class="btnlike" for="imWorld">世界の設定を読み込む</label>
         <input type="file" id="imWorld" accept=".json,application/json" hidden>
+        <button type="button" id="exGrid">区画データを書き出す（平面世界の地図用）</button>
+        <select id="exGridN" title="書き出す範囲（レベル4の区画の数）"><option value="8">8×8（4,194 km 角）</option><option value="10" selected>10×10（5,243 km 角）</option><option value="12">12×12（6,291 km 角）</option></select>
       </div>
-      <div class="note" id="exNote">標高データは今の表示範囲を、表示中の細かさで書き出します。世界の設定には、配線・シード・パラメータ・ランドマーク・メモが入ります。</div>
+      <div class="note" id="exNote">標高データは今の表示範囲を、表示中の細かさで書き出します。世界の設定には、配線・シード・パラメータ・ランドマーク・メモが入ります。区画データは中心を原点に 2.048 km 格子で一度だけ計算し、標高・ランドマーク・世界の設定を 1 ファイル（.sfw）にまとめます。10×10 で 1 分ほどかかります。</div>
     </div>
     <div class="panel">
       <h2>高さの分布（表示範囲）</h2>
@@ -1498,6 +1499,63 @@ document.getElementById("exJson").onclick=()=>{
 document.getElementById("exWorld").onclick=()=>{
   saveFile("silverfall-world-"+stamp()+".json",JSON.stringify({format:"silverfall-world-v1",graph:G2,uid,litR,loopCount,view,pins:notes.pins,memo:notes.memo},null,1));
 };
+// ---- grid export for the flat-world map (flatmap): the lit circle and a margin, at one fixed cell size ----
+const GRID_C=2.048;   // km: the cell of a level-4 tile (2^23 m / 2^4 / 256)
+let gridJob=false;
+async function exportGrid(){
+  if(gridJob) return;const note=document.getElementById("exNote");
+  let pl;try{pl=plan();}catch(e){note.textContent=e.message;return;}
+  const nT=+document.getElementById("exGridN").value||10,n=nT*256,cell=GRID_C,v={cx:0,cy:0,w:n*cell,h:n*cell},pxKm=cell;
+  gridJob=true;const btn=document.getElementById("exGrid");btn.disabled=true;
+  const out=new Int16Array(n*n);const t0=performance.now();
+  const say=m=>{note.textContent="区画データ: "+m;};
+  const put=(r0,E)=>{for(let i=0;i<E.length;i++){const e=E[i];out[r0*n+i]=Math.max(-32768,Math.min(32767,Math.round((isFinite(e)?e:-6000)*4)));}};
+  try{
+    const ok=pool.ok&&await pool.ready;
+    if(ok){
+      poolReset();job++;   // stop the picture on screen; it is drawn again at the end
+      const gs=JSON.stringify(G2),base={graph:gs,graphKey:hashStr(gs),loopCount,litR:lib.litR,pxKm},P=pool.ws.length,X0=-v.w/2,X1=v.w/2,Y0=-v.h/2,Y1=v.h/2;
+      const spread=async(type,node,list,extra)=>{const chunks=Array.from({length:P},()=>[]);list.forEach((t,i)=>chunks[i%P].push(t));
+        const rs=await Promise.all(chunks.map((c,i)=>c.length?poolCall(i,{...base,type,node,list:c,tiles:extra?extra(c):null}):null));
+        for(const r of rs){if(!r)continue;if(r.err) throw r;for(const [k,t] of r.out) cacheSet(k,t);}};
+      const regs=pl.steps.filter(st=>TYPES[st.n.type]&&TYPES[st.n.type].region).map(st=>[st.n.id,regionFns.get(st.n.id)]).filter(([,R])=>R&&pxKm<=4*R.ckm);
+      for(const [id,R] of regs){
+        const need=tilesFor(R,X0,Y0,X1,Y1).filter(([ti,tj])=>!tileCache.has(R.sig+"|p|"+ti+","+tj));
+        if(!need.length) continue;
+        const rawSet=new Map();for(const [ti,tj] of need)for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const k=R.rsig+"|r|"+(ti+di)+","+(tj+dj);if(!tileCache.has(k))rawSet.set(k,[ti+di,tj+dj]);}
+        say("区画ノード "+need.length+" 枚を計算中…");
+        await spread("raw",id,[...rawSet.values()]);
+        await spread("proc",id,need,c=>{const m=[];for(const [ti,tj] of c)for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){const k=R.rsig+"|r|"+(ti+di)+","+(tj+dj);m.push([k,tileCache.get(k)]);}return m;});
+      }
+      // the heights, in strips of rows; each thread takes a band of the strip and the area tiles it touches
+      const strip=128;
+      for(let s0=0;s0<n;s0+=strip){const s1=Math.min(n,s0+strip);
+        const bands=[];for(let i=0;i<P;i++){const r0=s0+Math.round(i*(s1-s0)/P),r1=s0+Math.round((i+1)*(s1-s0)/P);if(r1>r0)bands.push([r0,r1]);}
+        const rs=await Promise.all(bands.map(([r0,r1],i)=>{
+          const ya=v.cy+(r0-n/2)*pxKm,yb=v.cy+(r1-n/2)*pxKm,tiles=[];const has=pool.ws[i].has;if(has.size>1500) has.clear();
+          for(const [,R] of regs)for(const [ti,tj] of tilesFor(R,X0,ya,X1,yb)){const k=R.sig+"|p|"+ti+","+tj,t=tileCache.get(k);if(t&&!has.has(k)){tiles.push([k,t]);has.add(k);}}
+          return poolCall(i,{...base,type:"rows",v,Nx:n,Ny:n,r0,r1,preview:null,tiles});}));
+        for(let i=0;i<rs.length;i++){if(rs[i].err) throw rs[i];put(bands[i][0],rs[i].out.E);}
+        say(Math.round(100*s1/n)+"%　"+Math.round((performance.now()-t0)/1000)+" 秒");progEl.style.width=(100*s1/n)+"%";
+        await new Promise(r=>setTimeout(r,0));
+      }
+    }else{
+      // no threads: on the page, a few rows per frame
+      const cache={};lib.noRegion=false;
+      for(let r0=0;r0<n;r0+=16){const r1=Math.min(n,r0+16);const r=evalRows(pl,v,n,n,pxKm,r0,r1,null,cache);put(r0,r.E);
+        if(r0%256===0){say(Math.round(100*r1/n)+"%");progEl.style.width=(100*r1/n)+"%";await new Promise(r=>requestAnimationFrame(r));}}
+    }
+    const head={format:"silverfall-grid-v1",unit:"m",scale:0.25,n,C:Math.round(cell*1000),X0:Math.round(-n/2*cell*1000),Y0:Math.round(n/2*cell*1000),rows:"north-first",
+      litR:Math.round(litR*1000),origin:"照らす円の中心。X は東、Y は北（m）。標高は Int16 ×0.25 m、行は北から。",
+      pins:notes.pins.map(p=>({name:p.name||"",type:p.type||"mark",x:Math.round(p.x*1000),y:Math.round(-p.y*1000),note:p.note||""})),
+      world:{format:"silverfall-world-v1",graph:G2,uid,litR,loopCount,view,pins:notes.pins,memo:notes.memo},created:new Date().toISOString()};
+    const hj=new TextEncoder().encode(JSON.stringify(head)),hl=new Uint8Array(4);new DataView(hl.buffer).setUint32(0,hj.length,true);
+    await saveFile("silverfall-grid-"+stamp()+".sfw",new Blob([new TextEncoder().encode("SFW1"),hl,hj,out.buffer],{type:"application/octet-stream"}));
+    note.textContent+="（"+n+"×"+n+" 升、"+Math.round((performance.now()-t0)/1000)+" 秒）";
+  }catch(e){note.textContent="区画データを書き出せませんでした: "+(e&&(e.err||e.message)||e);}
+  gridJob=false;btn.disabled=false;progEl.style.width="0";render();
+}
+document.getElementById("exGrid").onclick=exportGrid;
 document.getElementById("imWorld").addEventListener("change",ev=>{
   const f=ev.target.files&&ev.target.files[0];if(!f)return;
   f.text().then(t=>{
@@ -1710,4 +1768,5 @@ poolStart();
 render();
 })();
 </script>
+
 </html>

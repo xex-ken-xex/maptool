@@ -21,6 +21,7 @@ header h1{font-size:15px;margin:0 8px 0 0;letter-spacing:.04em}
 header label{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 header .grp{display:inline-flex;gap:2px;border:1px solid var(--ink-3);border-radius:4px;overflow:hidden}
 header .grp button{border:0;border-radius:0}
+header .btnlike{cursor:pointer;border:1px solid var(--ink-3);border-radius:4px;padding:2px 8px;background:rgba(255,255,255,.35)}
 button{font:inherit;background:#f6efdf;border:1px solid var(--ink-3);border-radius:3px;padding:3px 9px;color:var(--ink);cursor:pointer}
 button.on{background:var(--ink);color:var(--paper)}
 input[type=number]{font:inherit;background:#f6efdf;border:1px solid var(--ink-3);border-radius:3px;padding:2px 6px;width:7em}
@@ -55,13 +56,15 @@ input[type=range]{width:90px}
   <label><input type="checkbox" id="lLit" checked>照らす円</label>
   <label><input type="checkbox" id="lHoly" checked>極と聖地</label>
   <button id="home">中心へ</button>
+  <label class="btnlike" title="地形工房の「区画データを書き出す」で作った .sfw">世界を読み込む<input type="file" id="worldFile" accept=".sfw" hidden></label>
+  <button id="worldOff" hidden>仮の世界に戻す</button>
   <span class="hint">ドラッグで移動、ホイールで拡大、F2 でデバッグ表示</span>
 </header>
 <div id="box">
   <canvas id="map"></canvas>
   <div id="hud"></div>
   <div id="dbg" hidden></div>
-  <div id="note">地形と地名は仮の生成（地形工房からの書き出しは試作3）</div>
+  <div id="note">地形と地名は仮の生成（地形工房の .sfw をここへドロップ）</div>
 </div>
 <script>
 "use strict";
@@ -82,7 +85,21 @@ function smooth(a,b,v){let t=(v-a)/(b-a);t=t<0?0:t>1?1:t;return t*t*(3-2*t);}
 function clamp(v,a,b){return v<a?a:v>b?b:v;}
 /* ---------- stand-in terrain: a fixed function of the world position, so every level samples the same ground ---------- */
 const LIT_KM=2200;
-function heightAt(X,Y,seed){            // X east, Y north in metres -> height in metres
+let WORLD=null;   // an imported grid from 地形工房: {n,C,X0,Y0,G:Int16Array (0.25 m), litR}
+function worldHeight(X,Y,seed){
+  const w=WORLD,gx=(X-w.X0)/w.C-.5,gy=(w.Y0-Y)/w.C-.5,n=w.n;
+  // the outermost 400 km of the grid blend into the stand-in generator, which alone makes the frontier beyond the grid
+  const inside=Math.min(gx,n-1-gx,gy,n-1-gy)*w.C;if(inside<=0) return genHeight(X,Y,seed);const t=1-smooth(0,400e3,inside);
+  const cx=clamp(gx,0,n-1.001),cy=clamp(gy,0,n-1.001),x0=Math.floor(cx),y0=Math.floor(cy),fx=cx-x0,fy=cy-y0,k=y0*n+x0,G=w.G;
+  let h=((G[k]*(1-fx)+G[k+1]*fx)*(1-fy)+(G[k+n]*(1-fx)+G[k+n+1]*fx)*fy)*.25;
+  if(t>0) h=h*(1-t)+genHeight(X,Y,seed)*t;
+  // a little detail below the 2 km cell, fading out at the shore so the coast stays where the grid put it
+  const x=X/1e3,y=Y/1e3,amp=h>=0?18*smooth(8,120,h):6*smooth(-8,-120,h);
+  if(amp>0) h+=fbm(x/3,y/3,seed+4,4,.5)*amp+fbm(x/.7,y/.7,seed+5,2,.5)*amp*.25;
+  return h;
+}
+function heightAt(X,Y,seed){return WORLD?worldHeight(X,Y,seed):genHeight(X,Y,seed);}
+function genHeight(X,Y,seed){            // X east, Y north in metres -> height in metres
   const x=X/1e3,y=Y/1e3,r=Math.hypot(x,y);
   const wx=fbm(x/900,y/900,seed+1,4,.5)*260,wy=fbm(x/900+5.2,y/900+1.3,seed+2,4,.5)*260;
   let s=fbm((x+wx)/1300,(y+wy)/1300,seed,8,.5);
@@ -171,18 +188,19 @@ function edt(H,W,Hh,isZero){
 /* ---------- worker: tiles (N cells + a skirt all round, north row first), coarse bands for the hydrology, the hydrology itself ---------- */
 const WORKER_SRC=SRC.slice(SRC.indexOf("/*GEN1*/"),SRC.indexOf("/*GEN2*/"))+`
 onmessage=e=>{const m=e.data;
+  if(m.kind==="world"){WORLD=m.world?{n:m.world.n,C:m.world.C,X0:m.world.X0,Y0:m.world.Y0,G:new Int16Array(m.world.buf)}:null;return;}
   if(m.kind==="tile"){const {id,z,i,j,N,SK,seed,T0}=m,T=T0/Math.pow(2,z),s=T/N,M=N+2*SK,E=new Float32Array(M*M);
     for(let r=0;r<M;r++){const Y=(j+1)*T-(r-SK+.5)*s;for(let c=0;c<M;c++){E[r*M+c]=heightAt(i*T+(c-SK+.5)*s,Y,seed);}}
     postMessage({kind:"tile",id,buf:E.buffer},[E.buffer]);}
   else if(m.kind==="band"){const {r0,r1,n,C,X0,Y0,seed}=m,out=new Float32Array((r1-r0)*n);
     for(let r=r0;r<r1;r++){const Y=Y0-(r+.5)*C;for(let c=0;c<n;c++) out[(r-r0)*n+c]=heightAt(X0+(c+.5)*C,Y,seed);}
-    postMessage({kind:"band",r0,seed,buf:out.buffer},[out.buffer]);}
+    postMessage({kind:"band",r0,seed,gen:m.gen,buf:out.buffer},[out.buffer]);}
   else if(m.kind==="hydro"){const {n,C,X0,Y0,seed}=m,H=new Float32Array(m.buf),t0=Date.now(),h=hydro(H,n,C,X0,Y0);
-    postMessage({kind:"hydro",seed,n,C,X0,Y0,ms:Date.now()-t0,lake:h.lake.buffer,pts:h.pts.buffer,rivers:h.rivers,lands:h.lands,lakes:h.lakes,peaks:h.peaks},[h.lake.buffer,h.pts.buffer]);}
+    postMessage({kind:"hydro",seed,gen:m.gen,n,C,X0,Y0,ms:Date.now()-t0,lake:h.lake.buffer,pts:h.pts.buffer,rivers:h.rivers,lands:h.lands,lakes:h.lakes,peaks:h.peaks},[h.lake.buffer,h.pts.buffer]);}
 };`;
 
 /* ---------- settings and view ---------- */
-const S={seed:7,finest:10,shade:1,N:256,SK:24,T0:8388608,litR:2200e3,baseLevel:6,hydroC:4000,hydroR:1.2};
+const S={seed:7,gen:0,finest:10,shade:1,N:256,SK:24,T0:8388608,litR:2200e3,baseLevel:6,hydroC:4000,hydroR:1.2};
 const HOLY=[{n:"極",x:0,y:0,pole:true},{n:"聖地A",x:-520e3,y:340e3},{n:"聖地B",x:610e3,y:-180e3},{n:"聖地C",x:120e3,y:-700e3}];
 const layers={lContour:true,lIso:true,lWave:true,lRiver:true,lLabel:true,lLit:true,lHoly:true};
 const view={mode:"plane",x:0,y:0,zoom:1.2,lu:0,lv:0,lz:0};   // plane: centre (m) + zoom (m/px = 32768/2^zoom); log chart: centre (rad, ln r/R0) + zoom
@@ -199,7 +217,7 @@ const pool=[];let hydroW=null;
 function makeWorkers(){
   const n=Math.max(1,Math.min(8,(navigator.hardwareConcurrency||4)-1)),url=URL.createObjectURL(new Blob([WORKER_SRC],{type:"text/javascript"}));
   for(let k=0;k<n;k++){const w=new Worker(url);w.busy=false;w.onmessage=e=>{const m=e.data;
-    if(m.kind==="tile"){const rec=store.get(m.id);w.busy=false;inflight--;if(rec&&rec.seed===S.seed){rec.E=new Float32Array(m.buf);rec.pending=false;rec.img=null;schedule();}pump();}
+    if(m.kind==="tile"){const rec=store.get(m.id);w.busy=false;inflight--;if(rec&&rec.seed===S.seed&&rec.gen===S.gen){rec.E=new Float32Array(m.buf);rec.pending=false;rec.img=null;schedule();}pump();}
     else if(m.kind==="band"){w.busy=false;bandDone(m);pump();}};pool.push(w);}
   hydroW=new Worker(url);hydroW.onmessage=e=>hydroDone(e.data);
 }
@@ -207,12 +225,12 @@ function pump(){
   queue.sort((a,b)=>b.pri-a.pri);
   for(const w of pool){if(w.busy) continue;
     if(hydroBands.length){const b=hydroBands.pop();w.busy=true;w.postMessage(Object.assign({kind:"band"},b));continue;}
-    let rec;while(queue.length){const q=queue.pop();if(q.seed===S.seed&&!q.E&&q.pending){rec=q;break;}}
+    let rec;while(queue.length){const q=queue.pop();if(q.seed===S.seed&&q.gen===S.gen&&!q.E&&q.pending){rec=q;break;}}
     if(!rec) return;w.busy=true;inflight++;w.postMessage({kind:"tile",id:rec.key,z:rec.z,i:rec.i,j:rec.j,N:S.N,SK:S.SK,seed:S.seed,T0:S.T0});}
 }
 function tileGet(z,i,j,pri){
   const key=z+"/"+i+"/"+j;let rec=store.get(key);
-  if(!rec){rec={key,z,i,j,E:null,img:null,pending:true,seed:S.seed,pri:0};store.set(key,rec);queue.push(rec);}
+  if(!rec){rec={key,z,i,j,E:null,img:null,pending:true,seed:S.seed,gen:S.gen,pri:0};store.set(key,rec);queue.push(rec);}
   rec.last=++tick;rec.pri=pri||0;
   if(rec.pending&&!rec.E) pump();
   return rec;
@@ -226,17 +244,17 @@ function trimStore(){
 /* ---------- hydrology: a coarse grid of the lit world, made in bands by the pool, analysed by one worker ---------- */
 let hydroBands=[],hydroGrid=null,hydroState="idle",HY=null;   // HY: {n,C,X0,Y0,lake,pts,rivers,lands,lakes,peaks,names}
 function hydroStart(){
-  const R=S.litR*S.hydroR,C=S.hydroC,n=Math.ceil(2*R/C);hydroGrid={n,C,X0:-R,Y0:R,H:new Float32Array(n*n),left:0,seed:S.seed};
+  const R=S.litR*S.hydroR,C=S.hydroC,n=Math.ceil(2*R/C);hydroGrid={n,C,X0:-R,Y0:R,H:new Float32Array(n*n),left:0,seed:S.seed,gen:S.gen};
   const bands=Math.max(4,pool.length*2),per=Math.ceil(n/bands);hydroBands=[];
-  for(let b=0;b<bands;b++){const r0=b*per,r1=Math.min(n,r0+per);if(r0<r1){hydroBands.push({r0,r1,n,C,X0:-R,Y0:R,seed:S.seed});hydroGrid.left++;}}
+  for(let b=0;b<bands;b++){const r0=b*per,r1=Math.min(n,r0+per);if(r0<r1){hydroBands.push({r0,r1,n,C,X0:-R,Y0:R,seed:S.seed,gen:S.gen});hydroGrid.left++;}}
   hydroBands.reverse();hydroState="bands";HY=null;pump();
 }
 function bandDone(m){
-  if(!hydroGrid||m.seed!==hydroGrid.seed) return;const g=hydroGrid;g.H.set(new Float32Array(m.buf),m.r0*g.n);
-  if(--g.left===0){hydroState="analysing";const H=g.H;hydroGrid=null;hydroW.postMessage({kind:"hydro",n:g.n,C:g.C,X0:g.X0,Y0:g.Y0,seed:g.seed,buf:H.buffer},[H.buffer]);}
+  if(!hydroGrid||m.seed!==hydroGrid.seed||m.gen!==hydroGrid.gen) return;const g=hydroGrid;g.H.set(new Float32Array(m.buf),m.r0*g.n);
+  if(--g.left===0){hydroState="analysing";const H=g.H;hydroGrid=null;hydroW.postMessage({kind:"hydro",n:g.n,C:g.C,X0:g.X0,Y0:g.Y0,seed:g.seed,gen:g.gen,buf:H.buffer},[H.buffer]);}
 }
 function hydroDone(m){
-  if(m.seed!==S.seed) return;
+  if(m.seed!==S.seed||m.gen!==S.gen) return;
   HY={n:m.n,C:m.C,X0:m.X0,Y0:m.Y0,lake:new Float32Array(m.lake),pts:new Float32Array(m.pts),rivers:m.rivers,lands:m.lands,lakes:m.lakes,peaks:m.peaks,ms:m.ms};
   for(const rv of HY.rivers){let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18;for(let p=rv.st;p<rv.en;p+=3){const x=HY.pts[p],y=HY.pts[p+1];if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}rv.bb=[x0,y0,x1,y1];}
   nameFeatures();hydroState="ready";for(const r of store.values()) r.img=null;schedule();
@@ -259,6 +277,7 @@ function nameFor(kind,id){const h=ih(id*7+1,kind.length,S.seed+99),pick=(arr,k)=
   else s+=pick(SYL[kind],20);
   return s[0].toUpperCase()+s.slice(1);}
 function nameFeatures(){
+  HY.pins=WORLD?WORLD.pins:[];
   HY.lands.sort((a,b)=>b.area-a.area);HY.lands.forEach((l,i)=>{l.name=nameFor("land",i);});
   HY.lakes.sort((a,b)=>b.area-a.area);HY.lakes.forEach((l,i)=>{l.name=nameFor("lake",i);});
   HY.rivers.sort((a,b)=>b.mx-a.mx);HY.rivers.forEach((r,i)=>{r.name=nameFor("river",i);r.id=i;});
@@ -473,6 +492,21 @@ function drawLabels(ctx,W,H){
     const cs=Math.abs(Math.cos(ang)),sn=Math.abs(Math.sin(ang)),bw=tw*cs+fh*sn,bh=tw*sn+fh*cs,b=[x-bw/2-3,y-bh/2-2,x+bw/2+3,y+bh/2+2];
     if(b[0]<0||b[2]>W||b[1]<0||b[3]>H||!boxFree(b)) return false;labelBoxes.push(b);
     ctx.save();ctx.translate(x,y);ctx.rotate(ang);if(halo){ctx.lineWidth=3;ctx.strokeStyle="rgba(239,229,207,.85)";ctx.lineJoin="round";ctx.strokeText(txt,0,0);}ctx.fillStyle=fill;ctx.fillText(txt,0,0);ctx.restore();return true;};
+  // landmarks from 地形工房: a mark, and the name to its upper right
+  if(HY.pins&&HY.pins.length){const kind={city:"都市",port:"港",castle:"城",tower:"塔",ruin:"遺跡",mark:"目印"};
+    for(const pin of HY.pins){const p=toScreen(W,H,pin.x,pin.y);if(!p||p[0]<-10||p[0]>W+10||p[1]<-10||p[1]>H+10) continue;const sc=localScale(W,H,pin.x,pin.y);if(sc>6000) continue;
+      const [x,y]=p,fs=clamp(15-Math.log2(Math.max(1,sc/60)),11.5,14.5),big=pin.type==="city"||pin.type==="port";
+      ctx.save();ctx.strokeStyle="#2b1d12";ctx.fillStyle="#2b1d12";ctx.lineWidth=1.3;ctx.beginPath();
+      if(pin.type==="city"){ctx.arc(x,y,3.6,0,7);ctx.fill();ctx.strokeStyle="#efe5cf";ctx.lineWidth=1;ctx.stroke();}
+      else if(pin.type==="port"){ctx.arc(x,y,3.6,0,7);ctx.fillStyle="#efe5cf";ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(x,y,1.3,0,7);ctx.fillStyle="#2b1d12";ctx.fill();}
+      else if(pin.type==="castle"){ctx.rect(x-3,y-3,6,6);ctx.fillStyle="#efe5cf";ctx.fill();ctx.stroke();}
+      else if(pin.type==="tower"){ctx.moveTo(x,y-4.2);ctx.lineTo(x+3.6,y+2.6);ctx.lineTo(x-3.6,y+2.6);ctx.closePath();ctx.fillStyle="#efe5cf";ctx.fill();ctx.stroke();}
+      else if(pin.type==="ruin"){ctx.setLineDash([2,1.5]);ctx.arc(x,y,3.4,0,7);ctx.stroke();}
+      else{ctx.moveTo(x-3,y-3);ctx.lineTo(x+3,y+3);ctx.moveTo(x+3,y-3);ctx.lineTo(x-3,y+3);ctx.stroke();}
+      ctx.restore();
+      if(pin.name){ctx.font=(big?"600 ":"500 ")+fs.toFixed(1)+"px "+name;if("letterSpacing" in ctx) ctx.letterSpacing="0px";const tw=ctx.measureText(pin.name).width,st=big?"600":"500";
+        put(pin.name,x+9+tw/2,y-fs*.55,0,fs,st,"#2b1d12",0,true)||put(pin.name,x+9+tw/2,y+fs*.55,0,fs,st,"#2b1d12",0,true)||put(pin.name,x-9-tw/2,y-fs*.55,0,fs,st,"#2b1d12",0,true);}
+      labelBoxes.push([x-5,y-5,x+5,y+5]);}}
   // land masses: letter-spaced serif, size by the area on screen
   for(const l of HY.lands){if(l.area<200e6) break;const p=toScreen(W,H,l.x,l.y);if(!p) continue;const sc=localScale(W,H,l.x,l.y),apx=l.area/(sc*sc);
     if(apx<2500||apx>W*H*12) continue;const fs=clamp(11+6*Math.log10(apx/2500),11,30);
@@ -573,6 +607,32 @@ function syncModes(from,to){const W=box.clientWidth;
 function setMode(m){syncModes(view.mode,m);view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"]]) $(id).classList.toggle("on",k===m);schedule();saveView();}
 $("mPlane").onclick=()=>setMode("plane");$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
 $("home").onclick=()=>{view.x=0;view.y=0;view.zoom=1.2;view.lu=0;view.lv=0;view.lz=0;schedule();saveView();};
+/* ---------- an imported world: the .sfw file from 地形工房 (magic, header length, JSON header, Int16 heights) ---------- */
+function parseSfw(buf,fname){
+  const u8=new Uint8Array(buf);if(String.fromCharCode(u8[0],u8[1],u8[2],u8[3])!=="SFW1") throw new Error("区画データ（.sfw）ではありません");
+  const hl=new DataView(buf).getUint32(4,true),head=JSON.parse(new TextDecoder().decode(u8.subarray(8,8+hl))),n=head.n;
+  if(8+hl+n*n*2>buf.byteLength) throw new Error("ファイルが途中で切れています");
+  const G=new Int16Array(buf.slice(8+hl,8+hl+n*n*2));
+  return {n,C:head.C,X0:head.X0,Y0:head.Y0,litR:head.litR||2200e3,pins:(head.pins||[]).map((p,i)=>({id:i,name:p.name,type:p.type,x:p.x,y:p.y})),G,name:fname||"",created:head.created||""};
+}
+function applyWorld(w,fname){
+  WORLD=w;S.gen++;S.litR=w?w.litR:2200e3;
+  const msg=w?{kind:"world",world:{n:w.n,C:w.C,X0:w.X0,Y0:w.Y0,buf:w.G.buffer}}:{kind:"world",world:null};
+  for(const wk of pool) wk.postMessage(msg);hydroW.postMessage(msg);
+  $("worldOff").hidden=!w;$("note").textContent=w?"地形工房の世界: "+(w.name||"")+"  "+w.n+"×"+w.n+" 升  ランドマーク "+w.pins.length:"地形と地名は仮の生成（地形工房の .sfw をここへドロップ）";
+  resetTiles();
+}
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open("sf-flatmap",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function idbPut(k,v){try{const d=await idb();await new Promise((res,rej)=>{const t=d.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=res;t.onerror=()=>rej(t.error);});}catch(e){}}
+async function idbGet(k){try{const d=await idb();return await new Promise((res,rej)=>{const r=d.transaction("kv").objectStore("kv").get(k);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}catch(e){return null;}}
+async function loadWorldFile(f){
+  try{const buf=await f.arrayBuffer(),w=parseSfw(buf,f.name);applyWorld(w,f.name);idbPut("world",{buf,name:f.name});}
+  catch(e){$("note").textContent="読み込めませんでした: "+e.message;}
+}
+$("worldFile").onchange=ev=>{const f=ev.target.files[0];if(f) loadWorldFile(f);ev.target.value="";};
+$("worldOff").onclick=()=>{applyWorld(null);idbPut("world",null);};
+box.addEventListener("dragover",ev=>{ev.preventDefault();});
+box.addEventListener("drop",ev=>{ev.preventDefault();const f=ev.dataTransfer.files&&ev.dataTransfer.files[0];if(f) loadWorldFile(f);});
 function resetTiles(){store.clear();queue.length=0;lastTile.E=null;hydroStart();schedule();}
 $("seed").onchange=()=>{S.seed=+$("seed").value|0;resetTiles();saveView();};
 $("reseed").onclick=()=>{$("seed").value=Math.floor(Math.random()*1e6);$("seed").onchange();};
@@ -584,6 +644,7 @@ function saveView(){try{localStorage.setItem("sf-flatmap-2",JSON.stringify({view
 new ResizeObserver(()=>schedule()).observe(box);
 if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>schedule());
 makeWorkers();hydroStart();setMode(view.mode);
+idbGet("world").then(r=>{if(r&&r.buf){try{applyWorld(parseSfw(r.buf,r.name),r.name);}catch(e){}}});
 </script>
 </body>
 </html>
