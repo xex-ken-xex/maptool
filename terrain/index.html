@@ -52,6 +52,8 @@ input[type=number],input[type=text],select,textarea{background:#f6efdf;border:1p
 .field{display:flex;flex-direction:column;gap:2px}
 .field input[type=range]{width:100%;accent-color:var(--ink)}
 .field .fh{display:flex;justify-content:space-between;gap:8px}
+.field .hint{color:var(--ink-2);font-size:12px;line-height:1.5;margin-top:2px}
+#iDesc{margin:0 0 14px;line-height:1.6}
 .field .fh span:last-child{font-family:var(--mono);font-size:12px}
 #hyp{width:100%;height:110px;display:block}
 /* node bench */
@@ -235,6 +237,7 @@ body.maxed{overflow:hidden}
 
 <section class="panel" id="insp">
   <h2 id="inspTitle">ノードを選ぶと、ここで中身を編集できます</h2>
+  <p class="note" id="iDesc" hidden></p>
   <div class="inspector" id="inspBody" hidden>
     <div class="side">
       <div class="field"><label for="iName">名前</label><input type="text" id="iName"></div>
@@ -1439,15 +1442,61 @@ function markBad(id){board.querySelectorAll(".node").forEach(el=>el.classList.to
 
 /* ---------- inspector ---------- */
 const $=id=>document.getElementById(id);
+/* ---------- what each built-in node does, and what each slider changes ---------- */
+const HELP={
+ plates:{d:"世界をプレートに区切り、プレートどうしの動き（近づく・離れる）を下流に渡します。陸か海かの土台と、山脈・海溝・海嶺のできる場所はここで決まります。シードを振るとプレートの配置が丸ごと変わります。",
+  p:{plateKm:"上げるとプレートが大きく数が減り、大陸も山脈も大づかみになります。下げると細かく区切られ、境界（山脈・海溝）が増えます。",
+     contFrac:"上げると大陸プレートが増えて陸が広がります。下げると海が多い世界になります。",
+     warp:"上げると境界が曲がりくねり、自然な形になります。0だと境界がまっすぐな多角形になります。",
+     lift:"上げると大陸プレートが持ち上がり海洋プレートが沈むので、陸と海の差がはっきりします。下げると陸の広さはほかのノードの形まかせになります。"}},
+ mega:{d:"プレートとは別に、大きな大陸を丸ごと持ち上げます。船が大きく回り込む理由になる「大きな陸」を作る役です。",
+  p:{sizeKm:"上げると大陸が大きくなります。",prob:"中心以外にも巨大大陸が出る確率です。上げると遠くにも大きな陸が増えます。",
+     strength:"上げると巨大大陸の部分がしっかり陸になります。0でこのノードは効きません。",rough:"上げると大陸の輪郭が円から崩れ、湾や半島ができます。",
+     center:"1なら世界の中心（照らす円）に必ず1つ置きます。0なら中心も運しだいです。"}},
+ shape:{d:"プレートの底上げと巨大大陸にノイズを足して、陸と海の境目（海岸線のもと）を決めます。出力 s は0より上が陸、下が海です。",
+  p:{coastD:"上げると海岸線が入り組み（フィヨルドやリアス式のよう）、小島も増えます。下げると海岸がなめらかになります。",
+     scaleKm:"ノイズの大きさです。上げると陸のかたまりが大きくなり、下げると小さな島や入り江が多くなります。",
+     sea:"上げると海面が上がり、陸が減って島が増えます。下げると陸がつながって大陸が広がります。"}},
+ boundary:{d:"プレートの境目に地形を足します。陸どうしがぶつかると山脈、離れると地溝。海ではぶつかると海溝と弧状列島（日本列島のような島の列）、離れると海嶺ができます。",
+  p:{trench:"上げると海溝が深くなります。",ridge:"上げると海の真ん中の海嶺（海底山脈）が高くなります。",
+     arc:"上げると弧状列島が高くなり、海の上に島の列が顔を出します。下げると海底の高まりにとどまります。",
+     rift:"上げると離れていく境目が深く裂け、細長い湾や地溝帯ができます。"}},
+ profile:{d:"s（陸か海かの度合い）を実際の標高 m に直します。海岸から大陸棚→大陸斜面→深海平原と深くなります。",
+  p:{shelfKm:"上げると浅い海（大陸棚）が沖まで広がります。航路や漁場になる浅瀬の広さです。",shelfEdge:"大陸棚の端の深さです。",
+     abyss:"上げると外洋がより深くなります。",landH:"上げると内陸が全体に高い台地になります。下げると低地が広がります。"}},
+ add:{d:"a に b を足します（b は倍率をかけてから）。山の高さなどを重ねるのに使います。",p:{k:"b をどれだけ効かせるかです。0で b を無視します。"}},
+ mountains:{d:"プレート境界がぶつかる所（mtn）に、尾根の連なる山脈を立てます。",
+  p:{height:"上げると山脈が高くなります。",scaleKm:"上げると尾根と尾根の間が広い、ゆったりした山脈になります。下げると細かい尾根が密に並びます。"}},
+ seamounts:{d:"深い海に海山と火山島を置きます。海面まで届いたものが火山島で、波に削られて平らな台や平らな頭の海山になります。",
+  p:{cellKm:"上げると海山どうしの間隔が開いて数が減ります。",prob:"上げると海山と火山島が増えます。",
+     maxH:"上げると高い海山が増え、海面を越えて島になるものが増えます。",rough:"上げると火口が増え、谷や山腹の崩れで形が不規則になります。0で丸い円錐です。",
+     wave:"上げると波が島を強く削り、平らな浅瀬や水面下の平らな海山が増えます。0で削りません。"}},
+ detail:{d:"最後に細かな凸凹を足して、地形に手ざわりを出します。陸と海底で強さを分けられます。",
+  p:{landAmp:"上げると陸の丘や窪みが大きくなります。窪地が深く広くなるので、湖も大きく多くなります。",seaAmp:"上げると海底がでこぼこになります。",
+     scaleKm:"凸凹の大きさです。上げると大きくうねり、下げると細かくざらつきます。"}},
+ ice:{d:"循環の例です。高い所に氷床をのせます。「氷の重みで沈む」と輪につなぐと、氷→沈む→また氷…を繰り返して釣り合いを探します。",
+  p:{snow:"世界の中心での雪線の高さです。下げると低い山にも氷がのります。辺境（照らす円の外）では自動で低くなります。",maxIce:"氷の厚さの上限です。"}},
+ load:{d:"循環の例です。氷の重みで地面が沈みます。",p:{k:"上げると氷の下の地面が深く沈みます。"}},
+ rivers:{d:"区画ごとに雨水の流れを計算し、川を描き、川で谷を削り、窪地に湖を作ります。拡大しても同じ結果になるよう世界に固定した升目で計算します（初回は時間がかかります）。湖は窪地をあふれる高さまで水で満たしたものです。",
+  p:{cellKm:"計算の細かさです。下げると細い川や小さな谷まで出ますが、時間がかかります。1px がこの値の4倍より粗いと計算を省きます。",
+     strength:"上げると川が谷を深く削ります。",rain:"上げると集まる水が増え、川が太く、細い支流まで描かれるようになります。",
+     minArea:"上げると大きな川だけが描かれます。下げると小さな支流まで描かれます。",
+     lakeDepth:"上げると浅い窪地は湖にならず平地になり、湖が減ります。湖を減らすにはこれがいちばん効きます。",
+     lakeCells:"上げると小さな湖が消えます（大きな湖は残ります）。"}},
+ custom:{d:"コードを自由に書けるノードです。下の「処理のコード」を書き換えて、自分の規則を試せます。",p:{a:"コードの中で p.a として使える値です。"}},
+ output:{d:"最終的な標高を受け取り、地図に描きます。river と lake をつなぐと川と湖も描きます。",p:{}}
+};
+
 function select(id){
   sel=id;board.querySelectorAll(".node").forEach(el=>el.classList.toggle("sel",el.dataset.id===id));
-  const n=G2.nodes.find(q=>q.id===id);if(!n){$("inspBody").hidden=true;$("inspTitle").textContent="ノードを選ぶと、ここで中身を編集できます";return;}
+  const n=G2.nodes.find(q=>q.id===id);if(!n){$("inspBody").hidden=true;$("iDesc").hidden=true;$("inspTitle").textContent="ノードを選ぶと、ここで中身を編集できます";return;}
   $("inspBody").hidden=false;$("inspTitle").textContent=n.name;
+  const hp=HELP[n.type]||{p:{}};$("iDesc").hidden=!hp.d;$("iDesc").textContent=(hp.d||"")+(n.type!=="output"?" シードを振ると同じ設定のまま別の地形になります。":"");
   $("iName").value=n.name;$("iSeed").value=n.seed;$("iIn").value=n.ins.join(", ");$("iOut").value=n.outs.join(", ");$("iCode").value=n.code;$("iErr").textContent="";
   $("iDel").hidden=n.type==="output";$("iSeed").disabled=n.type==="output";$("iDice").disabled=n.type==="output";
   const T=TYPES[n.type];const specs=(T?T.params:[]).filter(q=>q.k in n.params);
   Object.keys(n.params).forEach(k=>{if(!specs.find(q=>q.k===k)) specs.push({k,l:k,min:-10,max:10,step:.01});});
-  $("iParams").innerHTML=specs.map(q=>'<div class="field"><div class="fh"><label for="pp_'+q.k+'">'+esc(q.l)+'</label><span id="pv_'+q.k+'">'+n.params[q.k]+'</span></div><input type="range" id="pp_'+q.k+'" data-k="'+q.k+'" min="'+q.min+'" max="'+q.max+'" step="'+q.step+'" value="'+n.params[q.k]+'"></div>').join("");
+  $("iParams").innerHTML=specs.map(q=>'<div class="field"><div class="fh"><label for="pp_'+q.k+'">'+esc(q.l)+'</label><span id="pv_'+q.k+'">'+n.params[q.k]+'</span></div><input type="range" id="pp_'+q.k+'" data-k="'+q.k+'" min="'+q.min+'" max="'+q.max+'" step="'+q.step+'" value="'+n.params[q.k]+'">'+(hp.p[q.k]?'<div class="hint">'+esc(hp.p[q.k])+'</div>':'')+'</div>').join("");
   $("iParams").querySelectorAll("input").forEach(inp=>{
     inp.addEventListener("input",()=>{$("pv_"+inp.dataset.k).textContent=inp.value;});
     inp.addEventListener("change",()=>{n.params[inp.dataset.k]=+inp.value;save();render();});
