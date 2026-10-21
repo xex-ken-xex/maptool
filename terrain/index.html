@@ -401,18 +401,42 @@ mountains:{name:"山脈の尾根",ins:["e","mtn"],outs:["e"],
   return {e:inp.e+p.height*inp.mtn*(.35+.65*r)};
  }},
 seamounts:{name:"海山と火山島",ins:["e"],outs:["e"],
- params:[{k:"cellKm",l:"間隔 km",min:80,max:1200,step:10,v:220},{k:"prob",l:"出る確率",min:0,max:1,step:.01,v:.3},{k:"maxH",l:"最大の高さ m",min:500,max:7000,step:100,v:5000}],
+ params:[{k:"cellKm",l:"間隔 km",min:80,max:1200,step:10,v:220},{k:"prob",l:"出る確率",min:0,max:1,step:.01,v:.3},{k:"maxH",l:"最大の高さ m",min:500,max:7000,step:100,v:5000},
+         {k:"rough",l:"形の乱れ",min:0,max:1,step:.01,v:.6},{k:"wave",l:"海蝕の強さ",min:0,max:1,step:.01,v:.6}],
  fn:function(x,y,inp,p,seed,lib){
   const e=inp.e; if(e>-1500) return {e:e};
-  const c=p.cellKm,ci=Math.floor(x/c),cj=Math.floor(y/c);let add=0;
+  const c=p.cellKm,ci=Math.floor(x/c),cj=Math.floor(y/c),g=lib.smooth(-1500,-3000,e);let z=e;
+  // 海蝕: 波は海面の少し下（波食の限界）より上を削る。古い島ほど広く削られ、平らな台の上に小さな島が残るか、
+  // 頂が平らな海山になる。山ごとに削ってから大きい方を取るので、山が重なっても段差はできない
+  const P=15,erode=(v,band)=>{if(v<=-P||band<=0) return v;const u=v+P;return u<band?-P+.04*u:-P+.04*band+(u-band);};
   for(let j=cj-1;j<=cj+1;j++)for(let i=ci-1;i<=ci+1;i++){
     if(lib.rnd(i,j,seed)>p.prob) continue;
     const mx=(i+lib.rnd(i,j,seed+1))*c,my=(j+lib.rnd(i,j,seed+2))*c;
-    const r=12+40*lib.rnd(i,j,seed+3),h=p.maxH*(.3+.7*lib.rnd(i,j,seed+4));
-    const d2=((x-mx)*(x-mx)+(y-my)*(y-my))/(r*r);
-    if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));
+    const r=12+40*lib.rnd(i,j,seed+3),h=p.maxH*(.3+.7*lib.rnd(i,j,seed+4)),old=lib.rnd(i,j,seed+5);
+    if(Math.abs(x-mx)>1.6*r||Math.abs(y-my)>1.6*r) continue;
+    // 形をゆがめる: 距離そのものを島の大きさに合わせたノイズでずらす
+    const k=seed+i*31+j*57,wx=lib.fbm(x/(r*.45),y/(r*.45),k,4,.55)*p.rough*.35*r,wy=lib.fbm(x/(r*.45)+7.1,y/(r*.45)-3.3,k+1,4,.55)*p.rough*.35*r;
+    const X=x+wx,Y=y+wy;
+    // 火口は1〜4つ。脇の火口は小さく低い
+    const nv=1+Math.floor(lib.rnd(i,j,seed+6)*4*p.rough+.2);let top=0;
+    for(let v=0;v<nv;v++){
+      const ang=lib.rnd(i,j,seed+20+v)*6.2832,off=v?r*(.25+.35*lib.rnd(i,j,seed+30+v)):0;
+      const vx=mx+Math.cos(ang)*off,vy=my+Math.sin(ang)*off,vr=v?r*(.35+.3*lib.rnd(i,j,seed+40+v)):r,vh=v?h*(.45+.35*lib.rnd(i,j,seed+50+v)):h;
+      const d2=((X-vx)*(X-vx)+(Y-vy)*(Y-vy))/(vr*vr);
+      if(d2<1) top=Math.max(top,vh*Math.pow(1-d2,1.5));
+    }
+    if(top<=0) continue;
+    // 雨が刻む放射状の谷（山腹で強く、頂と裾では弱い）
+    // 向きの円周上でノイズを引くので谷は中心から外へ筋状に伸びる
+    const dn=Math.hypot(X-mx,Y-my)/r,an=Math.atan2(Y-my,X-mx),gul=lib.ridged(Math.cos(an)*3.2+dn*.6,Math.sin(an)*3.2-dn*.4,k+2,3);
+    top*=1-p.rough*.3*(1-gul)*lib.smooth(.08,.35,dn)*(1-lib.smooth(.75,1,dn));
+    // 山腹崩壊: ある向きの外側がえぐれて馬蹄形になる
+    const ca=lib.rnd(i,j,seed+8)*6.2832,cut=p.rough*.55*lib.rnd(i,j,seed+9);
+    const dir=((X-mx)*Math.cos(ca)+(Y-my)*Math.sin(ca))/(Math.hypot(X-mx,Y-my)+1e-6);
+    top*=1-cut*lib.smooth(.55,.95,dir)*lib.smooth(.25,.75,dn);
+    z=Math.max(z,erode(e+top*g,p.wave*old*(60+.25*h)));
   }
-  return {e:e+add*lib.smooth(-1500,-3000,e)};
+  return {e:z};
  }},
 detail:{name:"細かな起伏",ins:["e","s"],outs:["e"],
  params:[{k:"landAmp",l:"陸の起伏 m",min:0,max:1500,step:10,v:320},{k:"seaAmp",l:"海底の起伏 m",min:0,max:500,step:5,v:70},{k:"scaleKm",l:"起伏の大きさ km",min:10,max:1000,step:10,v:150}],
@@ -506,8 +530,10 @@ function save(){try{localStorage.setItem("sf-terrain-graph-v3",JSON.stringify({g
 function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-v3")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
 G2=load()||(()=>{const g=defaultGraph();G2=g;autoLayout();return g;})();
 // built-in code from an older version of this page is brought up to date; code someone edited is left alone
-const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH"]};
+const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH"],seamounts:["if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));"]};
 function upgradeGraph(g){g.nodes.forEach(n=>{
+  // parameters added to a built-in type later start at their defaults
+  if(TYPES[n.type]&&n.params) TYPES[n.type].params.forEach(q=>{if(!(q.k in n.params)) n.params[q.k]=q.v;});
   if(n.type==="output")["river","lake"].forEach(k=>{if(!n.ins.includes(k))n.ins.push(k);});
   if(OLD_CODE[n.type]&&TYPES[n.type]&&OLD_CODE[n.type].some(f=>n.code&&n.code.includes(f))){
     const T=TYPES[n.type];n.code=T.fn.toString();
