@@ -1,5 +1,5 @@
 <!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Silver Fall 地形工房</title>
+<title>地形工房 陸が先</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -131,7 +131,7 @@ body.maxed{overflow:hidden}
 <header>
   <div>
     <div class="lbl">Silver Fall · 地形生成の試作</div>
-    <h1>地形工房</h1>
+    <h1>地形工房 <small style="font-size:.5em;font-weight:600">陸が先の版（試作）</small></h1>
     <p>ノードをつないで陸と海底の高さを作ります。各ノードは自分のシードを持ち、同じシードなら地図のどこをどの順で見ても同じ地形になります。地図はドラッグで移動、ホイールか右上のボタンで拡大縮小、⤢で最大化、✎でメモ。左上から都市や城などのランドマークを打てます。</p>
   </div>
   <div class="row">
@@ -436,6 +436,32 @@ profile:{name:"断面（大陸棚→斜面→深海）",ins:["s"],outs:["e"],
   else e=-p.abyss-600*lib.smooth(0,.3,-s-sb-ss-rs);
   return {e:e};
  }},
+isostasy:{name:"浮かぶ高さ（地殻→地面）",ins:["s"],outs:["e"],
+ params:[{k:"oceanD",l:"海洋地殻の高さ m（マイナスで深い）",min:-7000,max:-1000,step:100,v:-4200},{k:"contH",l:"大陸地殻の高さ m",min:-500,max:2500,step:50,v:300},
+         {k:"marginW",l:"大陸の縁の広さ",min:.02,max:.4,step:.01,v:.3},{k:"landH",l:"内陸の高台 m",min:0,max:3000,step:50,v:900}],
+ fn:function(x,y,inp,p,seed,lib){
+  // 海を考えずに、地殻の厚さ（s: 大陸らしさ）から地面の高さを決める。厚い大陸地殻は高く浮き、薄い海洋地殻は低く沈む。
+  // 大陸の縁では地殻がだんだん薄くなるので、高さもなめらかに下がる。どこにも段も特別な点もない一枚の地面になる
+  const s=inp.s,t=lib.smooth(-p.marginW,p.marginW,s);
+  return {e:p.oceanD+(p.contH-p.oceanD)*t+p.landH*.6*lib.smooth(0,.3,s)+p.landH*.4*lib.smooth(.15,.6,s)};
+ }},
+sealevel:{name:"海面と波の平坦化",ins:["e"],outs:["e"],
+ params:[{k:"level",l:"海面の高さ m",min:-1500,max:1500,step:10,v:0},{k:"shelfD",l:"大陸棚の深さ m",min:20,max:400,step:10,v:130},
+         {k:"reach",l:"平らにならす深さの範囲 m",min:0,max:2500,step:50,v:1400},{k:"flat",l:"平らさ",min:0,max:1,step:.01,v:.8},
+         {k:"plainH",l:"海岸平野の高さ m",min:0,max:400,step:10,v:100},{k:"plainR",l:"平野にならす高さの範囲 m",min:0,max:1500,step:50,v:500}],
+ fn:function(x,y,inp,p,seed,lib){
+  // 地面ができてから水を張る。海面より下が海になり、海岸線は地面と水面の交わりとして決まる。
+  // 海面が上下した長い時代に、波と積もる砂が浅い所をならして大陸棚になる: 海面から reach の深さまでを、
+  // 「急な岸 → 平らな棚 → 棚の縁から急に落ちる」の形に写す。両端は動かさず単調なので、陸も深海も変わらず段差もできない
+  const v=inp.e-p.level,a=-p.shelfD-p.reach;
+  // 陸側も同じ考えで、川が運ぶ土砂が海岸の低い所を埋めて平野になる: 0〜plainR m を「低く平らな平野 → 内陸へ上がる坂」に写す
+  if(v>=0){if(v>=p.plainR||p.plainR<=0) return {e:v};const t=v/p.plainR,P=Math.min(p.plainH,p.plainR*.6);
+    const f=t<.6?P*(t/.6):P+(p.plainR-P)*((t-.6)/.4);return {e:v+(f-v)*p.flat};}
+  if(v<=a||p.reach<=0) return {e:v};
+  // 急な所（棚の縁より下）から平らな棚、岸近くの浅瀬へ、角を作らずなめらかに移る形
+  const t=(v-a)/(-a),k=p.reach/(-a),f=a+(-a)*(k*lib.smooth(0,.55,t)+(1-k)*t*t),lin=v;
+  return {e:lin+(f-lin)*p.flat};
+ }},
 add:{name:"足し算",ins:["a","b"],outs:["e"],params:[{k:"k",l:"b の倍率",min:0,max:2,step:.05,v:1}],
  fn:function(x,y,inp,p,seed,lib){ return {e:inp.a+inp.b*p.k}; }},
 mountains:{name:"山脈の尾根",ins:["e","mtn"],outs:["e"],
@@ -561,18 +587,19 @@ function mkNode(type,x,y,seed){
 function defaultGraph(){
   uid=1;
   const n={mega:mkNode("mega",20,300,4242),plates:mkNode("plates",20,40,1469),shape:mkNode("shape",250,20,2071),boundary:mkNode("boundary",480,60,333),
-    profile:mkNode("profile",710,20,0),add:mkNode("add",710,190,0),mountains:mkNode("mountains",940,60,808),
-    seamounts:mkNode("seamounts",940,230,512),detail:mkNode("detail",1170,60,97),rivers:mkNode("rivers",1400,60,0),output:mkNode("output",1170,280,0)};
+    profile:mkNode("isostasy",710,20,0),add:mkNode("add",710,190,0),mountains:mkNode("mountains",940,60,808),
+    seamounts:mkNode("seamounts",940,230,512),detail:mkNode("detail",1170,60,97),sea:mkNode("sealevel",1170,230,0),rivers:mkNode("rivers",1400,60,0),output:mkNode("output",1170,280,0)};
+  n.shape.params.sea=.06;   // the coast now lies part-way down the continental margin, so the crust is set a little thicker to keep the same share of land
   const W=[["mega","mega","shape","mega"],["plates","bias","shape","bias"],["shape","s","boundary","s"],
     ...["cc","ccRift","oS","oRift","oMtn","trench","arc","ridge","axis"].map(k=>["plates",k,"boundary",k]),
     ["boundary","s","profile","s"],["profile","e","add","a"],["boundary","add","add","b"],
     ["add","e","mountains","e"],["boundary","mtn","mountains","mtn"],["mountains","e","seamounts","e"],
-    ["seamounts","e","detail","e"],["boundary","s","detail","s"],["detail","e","rivers","e"],["rivers","e","output","e"],["rivers","river","output","river"],["rivers","lake","output","lake"],
+    ["seamounts","e","detail","e"],["boundary","s","detail","s"],["detail","e","sea","e"],["sea","e","rivers","e"],["rivers","e","output","e"],["rivers","river","output","river"],["rivers","lake","output","lake"],
     ["plates","id","output","id"],["plates","closing","output","closing"]];
   return {nodes:Object.values(n),wires:W.map(w=>({from:n[w[0]].id,fp:w[1],to:n[w[2]].id,tp:w[3]}))};
 }
-function save(){try{localStorage.setItem("sf-terrain-graph-v3",JSON.stringify({g:G2,uid}));}catch(e){}}
-function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-v3")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
+function save(){try{localStorage.setItem("sf-terrain-graph-landfirst1",JSON.stringify({g:G2,uid}));}catch(e){}}
+function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-landfirst1")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
 G2=load()||(()=>{const g=defaultGraph();G2=g;autoLayout();return g;})();
 // built-in code from an older version of this page is brought up to date; code someone edited is left alone
 const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["const C={cc:0,ccRift:0,oS:0","if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH","const s=inp.s,sb=p.shelfKm*.00055,sl=.03;"],seamounts:["if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));"]};
@@ -1622,6 +1649,14 @@ const HELP={
      slopeKm:"大陸棚の先の急な坂（大陸斜面）の幅です。上げると坂がゆるやかになり、深海までの距離が延びます。",
      riseKm:"斜面のふもとから深海平原まで、ゆっくり深くなる裾の長さです。上げると沖まで中くらいの深さが続きます。0で斜面からすぐ深海になります。",
      abyss:"上げると外洋がより深くなります。",landH:"上げると内陸が全体に高い台地になります。下げると低地が広がります。"}},
+ isostasy:{d:"海のことは考えずに、地殻の厚さ（大陸らしさ s）から地面の高さを決めます。厚い大陸地殻は高く浮き、薄い海洋地殻は低く沈みます。ここではまだ海はありません。",
+  p:{oceanD:"海洋地殻の部分の高さです。下げると外洋が深くなります。",contH:"大陸地殻の部分の高さです。上げると陸が広がり、下げると大陸の縁が水に沈んで浅い海が増えます。",
+     marginW:"大陸地殻が薄くなっていく縁の広さです。上げると陸から深海へゆっくり下がり、広い大陸棚や浅い海ができます。下げると岸からすぐ深くなります。",
+     landH:"上げると内陸が全体に高い台地になります。"}},
+ sealevel:{d:"でき上がった地面に水を張ります。海面より低い所が海になり、海岸線はここで初めて決まります。浅い所は波と砂でならされて平らな大陸棚になります。",
+  p:{level:"上げると海面が上がり、低い陸が沈んで陸が減ります。下げると陸が増え、大陸棚が陸になります。",shelfD:"大陸棚の深さの目安です。",
+     reach:"どの深さまでを波と砂でならすかです。上げると大陸棚が沖まで広がります。0でならしません。",flat:"上げると大陸棚と海岸平野がより平らになります。0で地面のままです。",
+     plainH:"海岸平野の高さの目安です。",plainR:"どの高さまでを平野にならすかです。上げると広い平野ができ、内陸の山へは急に上がります。0でならしません。"}},
  add:{d:"a に b を足します（b は倍率をかけてから）。山の高さなどを重ねるのに使います。",p:{k:"b をどれだけ効かせるかです。0で b を無視します。"}},
  mountains:{d:"プレート境界がぶつかる所（mtn）に、尾根の連なる山脈を立てます。",
   p:{height:"上げると山脈が高くなります。",scaleKm:"上げると尾根と尾根の間が広い、ゆったりした山脈になります。下げると細かい尾根が密に並びます。"}},
