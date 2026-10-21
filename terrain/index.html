@@ -303,46 +303,57 @@ plates:{name:"プレート",ins:[],outs:["bias","bd","closing","cont","other","u
   const wo=Math.max(3,Math.min(7,Math.ceil(Math.log2(ps/(1.1*25))))),wg=.55;
   const wx=lib.fbm(qx*1.1,qy*1.1,seed+1,wo,wg)*p.warp, wy=lib.fbm(qx*1.1+5.2,qy*1.1+1.3,seed+2,wo,wg)*p.warp;
   qx+=wx;qy+=wy;
-  const cx=Math.floor(qx),cy=Math.floor(qy),S=[];
-  let d1=1e9,a=0;
+  // 周りの25升の種（配列は使い回して、1地点ごとにオブジェクトを作らない）
+  const cx=Math.floor(qx),cy=Math.floor(qy),SI=lib._pSI||(lib._pSI=new Int32Array(50)),SP=lib._pSP||(lib._pSP=new Float64Array(75));
+  // 先に真ん中の9升で一番近い種を決め、外周の升は「どう置いても800km以内に入らない」なら種を引かない
+  let d1=1e9,a=0,ns=0;
+  for(let j=cy-1;j<=cy+1;j++)for(let i=cx-1;i<=cx+1;i++){const px=i+.1+.8*lib.rnd(i,j,seed+11),py=j+.1+.8*lib.rnd(i,j,seed+12),d=(px-qx)*(px-qx)+(py-qy)*(py-qy);if(d<d1)d1=d;}
+  const lim=d1+1600/ps;d1=1e9;
   for(let j=cy-2;j<=cy+2;j++)for(let i=cx-2;i<=cx+2;i++){
+    if(i<cx-1||i>cx+1||j<cy-1||j>cy+1){const dx=Math.max(0,i+.1-qx,qx-i-.9),dy=Math.max(0,j+.1-qy,qy-j-.9);if(dx*dx+dy*dy>=lim)continue;}
     const px=i+.1+.8*lib.rnd(i,j,seed+11),py=j+.1+.8*lib.rnd(i,j,seed+12),d=(px-qx)*(px-qx)+(py-qy)*(py-qy);
-    S.push([i,j,px,py,d]);if(d<d1){d1=d;a=S.length-1;}
+    SI[2*ns]=i;SI[2*ns+1]=j;SP[3*ns]=px;SP[3*ns+1]=py;SP[3*ns+2]=d;if(d<d1){d1=d;a=ns;}ns++;
   }
-  const plate=(i,j)=>{const an=lib.rnd(i,j,seed+4)*6.2832,v=.3+.7*lib.rnd(i,j,seed+5);return {cont:lib.rnd(i,j,seed+3)<p.contFrac,vx:Math.cos(an)*v,vy:Math.sin(an)*v,r:lib.rnd(i,j,seed+7)};};
-  const [i1,j1,ax,ay]=S[a],A=plate(i1,j1);
-  // e = おおよそ「そのプレートとの境界までの km」（自分のプレートは 0）
-  const near=[];let bd=1e9;
-  for(let k=0;k<S.length;k++){const [i,j,bx,by,d]=S[k],e=(d-d1)*ps/2;
+  const i1=SI[2*a],j1=SI[2*a+1],ax=SP[3*a],ay=SP[3*a+1];
+  // e = おおよそ「そのプレートとの境界までの km」（自分のプレートは 0）。近いプレートだけ性質を引く
+  const NE=lib._pNE||(lib._pNE={e:new Float64Array(25),x:new Float64Array(25),y:new Float64Array(25),d:new Float64Array(25),c:new Uint8Array(25),vx:new Float64Array(25),vy:new Float64Array(25),r:new Float64Array(25)});
+  let nn=0,ai=0,bd=1e9;
+  for(let k=0;k<ns;k++){const bx=SP[3*k],by=SP[3*k+1],d=SP[3*k+2],e=(d-d1)*ps/2;
     if(k!==a){const nl=Math.hypot(bx-ax,by-ay)||1,dk=(d-d1)/(2*nl)*ps;if(dk<bd)bd=dk;}
-    if(e<800) near.push({e,x:bx,y:by,d,P:k===a?A:plate(i,j)});}
+    if(e<800){const i=SI[2*k],j=SI[2*k+1],an=lib.rnd(i,j,seed+4)*6.2832,v=.3+.7*lib.rnd(i,j,seed+5);
+      if(k===a) ai=nn;
+      NE.e[nn]=e;NE.x[nn]=bx;NE.y[nn]=by;NE.d[nn]=d;NE.c[nn]=lib.rnd(i,j,seed+3)<p.contFrac?1:0;NE.vx[nn]=Math.cos(an)*v;NE.vy[nn]=Math.sin(an)*v;NE.r[nn]=lib.rnd(i,j,seed+7);nn++;}}
+  const Ec=NE.e,Xc_=NE.x,Yc_=NE.y,Dc=NE.d,Cc=NE.c,VX=NE.vx,VY=NE.vy,R=NE.r;
   // 1. 底上げ: 近いプレートほど重く混ぜる（重みは境界の両側で同じ）
-  let wb=0,bias=0;for(const q of near){const v=Math.exp(-q.e/150)-Math.exp(-800/150);wb+=v;bias+=v*(q.P.cont?p.lift:-p.lift);}
+  let wb=0,bias=0;const e800=Math.exp(-800/150);for(let m=0;m<nn;m++){const v=Math.exp(-Ec[m]/150)-e800;wb+=v;bias+=v*(Cc[m]?p.lift:-p.lift);}
   // 2. 境界の効果: 近くの「プレートの組」ごとに、その組の境界からの距離で計算して混ぜる。
   //    組の重みは両方のプレートの近さで決まり、どちら側から見ても同じなので、境界でも三重点でも段差ができない
-  const g=(X,c,w)=>Math.exp(-((X-c)/w)*((X-c)/w));
-  const C={cc:0,ccRift:0,oS:0,oRift:0,oMtn:0,trench:0,arc:0,ridge:0,axis:0};
+  const g=(X,c,w)=>{const t=(X-c)/w;return Math.exp(-t*t);};
+  let cc_=0,ccRift=0,oS=0,oRift=0,oMtn=0,trench=0,arc=0,ridge=0,axis=0;
   let wsum=0,closing=0,other=0,upper=0,ow=0,em=1e9;
-  const pairs=[],ai=near.findIndex(q=>q.P===A);
-  let e2=1e9;for(let m=0;m<near.length;m++) if(m!==ai&&near[m].e<e2) e2=near[m].e;   // the closest pair is (own, nearest neighbour)
-  for(let m=0;m<near.length;m++){if(near[m].e>e2+300)continue;for(let n=m+1;n<near.length;n++){if(near[n].e>e2+300)continue;const t=near[m].e+near[n].e;if(t<em)em=t;pairs.push([m,n,t]);}}
-  for(const [m,n,t] of pairs){if(t-em>300)continue;const w=Math.exp(-(t-em)/30);wsum+=w;
-    const I=near[m],J=near[n];let nx=J.x-I.x,ny=J.y-I.y;const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
-    const X=(J.d-I.d)/(2*nl)*ps;                                    // I の側で正、境界からの km
-    const cl=((I.P.vx-J.P.vx)*nx+(I.P.vy-J.P.vy)*ny)/2;
+  let e2=1e9;for(let m=0;m<nn;m++) if(m!==ai&&Ec[m]<e2) e2=Ec[m];   // the closest pair is (own, nearest neighbour)
+  for(let m=0;m<nn;m++){if(Ec[m]>e2+300)continue;for(let n=m+1;n<nn;n++){if(Ec[n]>e2+300)continue;const t=Ec[m]+Ec[n];if(t<em)em=t;}}
+  for(let m=0;m<nn;m++){if(Ec[m]>e2+300)continue;for(let n=m+1;n<nn;n++){if(Ec[n]>e2+300)continue;const t=Ec[m]+Ec[n];
+    if(t-em>300)continue;const w=Math.exp(-(t-em)/30);wsum+=w;
+    let nx=Xc_[n]-Xc_[m],ny=Yc_[n]-Yc_[m];const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
+    const X=(Dc[n]-Dc[m])/(2*nl)*ps;                                // m の側で正、境界からの km
+    const cl=((VX[m]-VX[n])*nx+(VY[m]-VY[n])*ny)/2;
     const conv=Math.max(0,cl),div=Math.max(0,-cl);
-    const cc=conv*g(X,0,350),ccr=div*g(X,0,150);C.cc+=w*cc;C.ccRift+=w*ccr;   // 陸どうしとして見たとき（山脈と地溝）
-    if(I.P.cont&&J.P.cont){C.oS+=w*.25*cc;C.oRift+=w*ccr;C.oMtn+=w*cc;}
-    else if(I.P.cont||J.P.cont){const Xc=I.P.cont?X:-X;                       // 大陸側から測った距離
-      C.oS+=w*.2*conv*g(Xc,100,250);C.oRift+=w*.5*div*g(Xc,0,120);C.oMtn+=w*.8*conv*g(Xc,150,180);C.trench+=w*conv*g(Xc,-50,45);}
-    else{const Y=I.P.r>J.P.r?-X:X;                                           // 沈む側から測った距離
-      C.arc+=w*conv*g(Y,-130,35);C.trench+=w*conv*g(Y,40,40);C.ridge+=w*div*g(Y,0,350);C.axis+=w*div*g(Y,0,12);}
+    const cc=conv>0?conv*g(X,0,350):0,ccr=div>0?div*g(X,0,150):0;cc_+=w*cc;ccRift+=w*ccr;   // 陸どうしとして見たとき（山脈と地溝）
+    if(Cc[m]&&Cc[n]){oS+=w*.25*cc;oRift+=w*ccr;oMtn+=w*cc;}
+    else if(Cc[m]||Cc[n]){const Xc=Cc[m]?X:-X;                              // 大陸側から測った距離
+      if(conv>0){oS+=w*.2*conv*g(Xc,100,250);oMtn+=w*.8*conv*g(Xc,150,180);trench+=w*conv*g(Xc,-50,45);}
+      else if(div>0) oRift+=w*.5*div*g(Xc,0,120);}
+    else{const Y=R[m]>R[n]?-X:X;                                             // 沈む側から測った距離
+      if(conv>0){arc+=w*conv*g(Y,-130,35);trench+=w*conv*g(Y,40,40);}
+      else if(div>0){ridge+=w*div*g(Y,0,350);axis+=w*div*g(Y,0,12);}}
     // 表示用: 自分のプレートを含む組の平均
-    if(m===ai||n===ai){const O=m===ai?J:I;ow+=w;closing+=w*cl;other+=w*(O.P.cont?1:0);upper+=w*(A.r>O.P.r?1:0);}
-  }
-  for(const k in C) C[k]/=wsum||1;
+    if(m===ai||n===ai){const o=m===ai?n:m;ow+=w;closing+=w*cl;other+=w*Cc[o];upper+=w*(R[ai]>R[o]?1:0);}
+  }}
+  const iw=1/(wsum||1);
   if(ow>0){closing/=ow;other/=ow;upper/=ow;}
-  return {bias:bias/wb,bd:bd,closing:closing,cont:A.cont?1:0,other:other,upper:upper,id:i1*7919+j1*104729,...C};
+  return {bias:bias/wb,bd:bd,closing:closing,cont:Cc[ai],other:other,upper:upper,id:i1*7919+j1*104729,
+    cc:cc_*iw,ccRift:ccRift*iw,oS:oS*iw,oRift:oRift*iw,oMtn:oMtn*iw,trench:trench*iw,arc:arc*iw,ridge:ridge*iw,axis:axis*iw};
  }},
 mega:{name:"巨大大陸",ins:[],outs:["mega"],
  params:[{k:"sizeKm",l:"大陸の半径 km",min:300,max:12000,step:50,v:1400},{k:"prob",l:"出る確率（升目ごと）",min:0,max:1,step:.01,v:.45},{k:"strength",l:"持ち上げる強さ",min:0,max:1.2,step:.01,v:.55},{k:"rough",l:"輪郭のゆがみ",min:0,max:1,step:.01,v:.45},{k:"center",l:"中心に必ず置く（0か1）",min:0,max:1,step:1,v:1}],
@@ -530,7 +541,7 @@ function save(){try{localStorage.setItem("sf-terrain-graph-v3",JSON.stringify({g
 function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-v3")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
 G2=load()||(()=>{const g=defaultGraph();G2=g;autoLayout();return g;})();
 // built-in code from an older version of this page is brought up to date; code someone edited is left alone
-const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH"],seamounts:["if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));"]};
+const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["const C={cc:0,ccRift:0,oS:0","if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH"],seamounts:["if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));"]};
 function upgradeGraph(g){g.nodes.forEach(n=>{
   // parameters added to a built-in type later start at their defaults
   if(TYPES[n.type]&&n.params) TYPES[n.type].params.forEach(q=>{if(!(q.k in n.params)) n.params[q.k]=q.v;});
@@ -838,7 +849,7 @@ function poolStart(){
   }catch(e){pool.ok=false;}
 }
 function poolSpawn(){
-  const w=new Worker(pool.url),rec={w,busy:0,cbs:new Map()};
+  const w=new Worker(pool.url),rec={w,busy:0,cbs:new Map(),has:new Set()};
   w.onmessage=e=>{const cb=rec.cbs.get(e.data.id);if(!cb)return;rec.cbs.delete(e.data.id);rec.busy--;cb(e.data);};
   w.onerror=e=>{e.preventDefault&&e.preventDefault();rec.dead=true;for(const cb of rec.cbs.values()) cb({err:"worker",fatal:true});rec.cbs.clear();rec.busy=0;};
   return rec;
@@ -850,7 +861,7 @@ function poolCall(i,msg,transfer){
 function poolReset(){  // a new picture is wanted: stop threads still busy with the old one
   pool.ws=pool.ws.map(r=>{if(r.busy>0){r.w.terminate();for(const cb of r.cbs.values()) cb({err:"stopped",stopped:true});return poolSpawn();}return r;});
 }
-const mainCache={},coarseCache={};
+const mainCache={},coarseCache={},doneCache=new Map();
 function render(){
   const my=++job;
   let pl;
@@ -858,15 +869,18 @@ function render(){
   const W=boxW(),H=boxH(),full=Math.min(box.classList.contains("max")?720:460,Math.round(W*Math.min(devicePixelRatio||1,1.5)))||400;
   const v={...view,h:viewH()};
   setStatus("計算中…（区画ノードは初回だけ時間がかかります）");regionSkipped=false;
+  const Nx=full,Ny=Math.max(1,Math.round(Nx*H/W)),pxKm=v.w/Nx;
+  const dk=JSON.stringify([JSON.stringify(G2),loopCount,lib.litR,v.cx,v.cy,v.w,v.h,Nx,Ny,preview]),hit=doneCache.get(dk);
   // a quick coarse picture first, without the area nodes, so something shows at once
-  {const Nx=96,Ny=Math.max(1,Math.round(Nx*H/W)),pxKm=v.w/Nx;lib.noRegion=true;
+  if(!hit){const Nx=96,Ny=Math.max(1,Math.round(Nx*H/W)),pxKm=v.w/Nx;lib.noRegion=true;
     try{const r=evalRows(pl,v,Nx,Ny,pxKm,0,Ny,preview,coarseCache);grid={Nx,Ny,...r,pxKm,...v};paint();}
     catch(e){lib.noRegion=false;const bad=pl.steps[evalStep];markBad(bad&&bad.n.id);setStatus((bad?bad.n.name+": ":"")+e.message,true);return;}
     lib.noRegion=false;}
-  const Nx=full,Ny=Math.max(1,Math.round(Nx*H/W)),pxKm=v.w/Nx;
-  const finish=(r,skipped)=>{if(my!==job)return;lib.pxKm=pxKm;regionSkipped=skipped;grid={Nx,Ny,...r,pxKm,...v};paint();progEl.style.width="0";
+  const finish=(r,skipped)=>{if(my!==job)return;
+    if(!hit){doneCache.set(dk,[r,skipped]);if(doneCache.size>8) doneCache.delete(doneCache.keys().next().value);}lib.pxKm=pxKm;regionSkipped=skipped;grid={Nx,Ny,...r,pxKm,...v};paint();progEl.style.width="0";
     setStatus(preview?"途中結果: "+previewLabel():"描画済み · 1px ≈ "+fmtKm(pxKm)+(skipped?"（区画ノードは拡大すると計算します）":""));drawHyp();};
   const fail=(step,msg)=>{if(my!==job)return;const bad=pl.steps[step];markBad(bad&&bad.n.id);progEl.style.width="0";setStatus((bad?bad.n.name+": ":"")+msg,true);};
+  if(hit){doneCache.delete(dk);doneCache.set(dk,hit);finish(hit[0],hit[1]);return;}
   if(pool.ok) renderPool(my,pl,v,Nx,Ny,pxKm,finish,fail);
   else renderMain(my,pl,v,Nx,Ny,pxKm,finish,fail);
 }
@@ -921,7 +935,9 @@ async function renderPool(my,pl,v,Nx,Ny,pxKm,finish,fail){
     const bands=[];for(let i=0;i<P;i++){const r0=Math.round(i*Ny/P),r1=Math.round((i+1)*Ny/P);if(r1>r0)bands.push([r0,r1]);}
     const rs=await Promise.all(bands.map(([r0,r1],i)=>{
       const ya=v.cy+(r0-Ny/2)*pxKm,yb=v.cy+(r1-Ny/2)*pxKm,tiles=[];
-      for(const [,R] of regs)for(const [ti,tj] of tilesFor(R,X0,ya,X1,yb)){const k=R.sig+"|p|"+ti+","+tj,t=tileCache.get(k);if(t)tiles.push([k,t]);}
+      // a thread keeps the tiles it was sent, so only new ones go (one it has dropped since is simply recomputed there)
+      const has=pool.ws[i].has;if(has.size>1500) has.clear();
+      for(const [,R] of regs)for(const [ti,tj] of tilesFor(R,X0,ya,X1,yb)){const k=R.sig+"|p|"+ti+","+tj,t=tileCache.get(k);if(t&&!has.has(k)){tiles.push([k,t]);has.add(k);}}
       return poolCall(i,{...base,type:"rows",v,Nx,Ny,r0,r1,preview,tiles});}));
     if(my!==job)return;
     let skipped=false;for(const r of rs){if(r.err) throw r;skipped=skipped||r.skipped;}
@@ -972,17 +988,28 @@ function paint(){
   ctx.drawImage(reliefC,0,0,mapC.width,mapC.height);
   if(!PV){
     const sx=mapC.width/Nx,sy=mapC.height/Ny;
-    const stroke=(lines,color,w)=>{ctx.strokeStyle=color;ctx.lineWidth=w*dpr;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
-      for(const l of lines){ctx.moveTo(l[0][0]*sx,l[0][1]*sy);for(let i=1;i<l.length;i++)ctx.lineTo(l[i][0]*sx,l[i][1]*sy);}ctx.stroke();};
+    // contours on screen are drawn straight from the cells as short pieces in one path (joining them into lines is only needed for SVG)
+    const iso=(t,color,w)=>{const {E}=grid;ctx.strokeStyle=color;ctx.lineWidth=w*dpr;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
+      const seg=(x1,y1,x2,y2)=>{ctx.moveTo((x1+.5)*sx,(y1+.5)*sy);ctx.lineTo((x2+.5)*sx,(y2+.5)*sy);};
+      for(let r=0;r<Ny-1;r++){let k=r*Nx,a0=E[k],d0=E[k+Nx];
+        for(let c=0;c<Nx-1;c++,k++){const a1=E[k+1],d1=E[k+Nx+1],A=a0>=t,B=a1>=t,D=d0>=t,F=d1>=t;
+          const ea=a0,eb=a1,ed=d0,ee=d1;a0=a1;d0=d1;
+          const code=(A?8:0)|(B?4:0)|(F?2:0)|(D?1:0);if(code===0||code===15) continue;
+          const Tx=c+(t-ea)/(eb-ea),Rz=r+(t-eb)/(ee-eb),Bx=c+(t-ed)/(ee-ed),Lz=r+(t-ea)/(ed-ea);
+          switch(code){
+            case 1:case 14:seg(c,Lz,Bx,r+1);break; case 2:case 13:seg(Bx,r+1,c+1,Rz);break;
+            case 3:case 12:seg(c,Lz,c+1,Rz);break; case 4:case 11:seg(Tx,r,c+1,Rz);break;
+            case 6:case 9:seg(Tx,r,Bx,r+1);break; case 7:case 8:seg(c,Lz,Tx,r);break;
+            case 5:seg(c,Lz,Tx,r);seg(Bx,r+1,c+1,Rz);break; case 10:seg(Tx,r,c+1,Rz);seg(c,Lz,Bx,r+1);break;}}}
+      ctx.stroke();};
     if(layers.lContour){
-      for(const z of ISO) stroke(isolines(z),"rgba(63,95,108,.5)",.8);
+      for(const z of ISO) iso(z,"rgba(63,95,108,.5)",.8);
       let mx=-1e9;for(const e of E) if(e>mx&&isFinite(e)) mx=e;
       const step=landStepFor(pxKm,mx);
-      for(let z=step;z<=mx;z+=step) stroke(isolines(z),z%(step*4)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(step*4)===0?1:.7);
+      for(let z=step;z<=mx;z+=step) iso(z,z%(step*4)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(step*4)===0?1:.7);
     }
-    const coast=isolines(0);
-    stroke(coast,"rgba(239,229,207,.7)",3.2);    // paper halo along the shore, like an engraved chart
-    stroke(coast,"#3d2b1c",1.4);
+    iso(0,"rgba(239,229,207,.7)",3.2);    // paper halo along the shore, like an engraved chart
+    iso(0,"#3d2b1c",1.4);
   }
   mapC.style.transform="";ovl.style.transform="";
   drawOverlay();
