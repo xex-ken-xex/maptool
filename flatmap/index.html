@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>平面世界の地図 試作1</title>
+<style>
+:root{
+  --paper:#efe5cf; --paper-2:#e6d8bb; --paper-3:#d9c7a3;
+  --ink:#3d2b1c; --ink-2:#6b5440; --ink-3:#9a8166;
+  --sea:#7d9496; --rust:#a4472b; --blue:#3f6b7a;
+  --body:"BIZ UDPGothic","Hiragino Sans","Noto Sans JP",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper-2);color:var(--ink);font:14px/1.5 var(--body);display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:6px 12px;background:var(--paper);border-bottom:1px solid var(--ink-3)}
+header h1{font-size:15px;margin:0 8px 0 0;letter-spacing:.04em}
+header label{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+header .grp{display:inline-flex;gap:2px;border:1px solid var(--ink-3);border-radius:4px;overflow:hidden}
+header .grp button{border:0;border-radius:0}
+button{font:inherit;background:#f6efdf;border:1px solid var(--ink-3);border-radius:3px;padding:3px 9px;color:var(--ink);cursor:pointer}
+button.on{background:var(--ink);color:var(--paper)}
+input[type=number]{font:inherit;background:#f6efdf;border:1px solid var(--ink-3);border-radius:3px;padding:2px 6px;width:7em}
+input[type=range]{width:90px}
+#box{position:relative;flex:1;min-height:0;overflow:hidden;background:var(--paper);touch-action:none;cursor:grab}
+#box.drag{cursor:grabbing}
+#map{position:absolute;inset:0;width:100%;height:100%;display:block}
+#hud{position:absolute;left:10px;top:8px;font:12px/1.5 var(--mono);white-space:pre;background:rgba(239,229,207,.85);padding:5px 9px;border-radius:3px;pointer-events:none;border:1px solid rgba(61,43,28,.25)}
+#dbg{position:absolute;left:10px;bottom:34px;font:12px/1.5 var(--mono);white-space:pre;background:rgba(30,22,14,.82);color:#f3ead6;padding:6px 10px;border-radius:3px;pointer-events:none}
+#note{position:absolute;right:10px;bottom:8px;font-size:12px;color:var(--ink-2);background:rgba(239,229,207,.8);padding:2px 8px;border-radius:3px;pointer-events:none}
+.hint{font-size:12px;color:var(--ink-2)}
+@media (max-width:700px){header h1{width:100%} header .hint{display:none} #hud{font-size:11px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>平面世界の地図 試作1</h1>
+  <span class="grp">
+    <button id="mPlane" class="on" title="工学座標そのまま。距離と方位がどこでも正確">平面</button>
+    <button id="mLog" title="横が極の周りの向き、縦が極からの距離の対数。羅針盤一定の航路が直線になる海図">海図（対数極）</button>
+    <button id="mDisc" title="無限の平面を一枚の円に。縁が無限遠">全体図（円盤）</button>
+  </span>
+  <label>seed <input type="number" id="seed" value="7"></label>
+  <button id="reseed">乱数</button>
+  <label>最細レベル <input type="number" id="finest" min="6" max="12" value="10" style="width:4em"></label>
+  <label>陰影 <input type="range" id="shade" min="0" max="200" value="100"></label>
+  <label><input type="checkbox" id="lContour" checked>等高線</label>
+  <label><input type="checkbox" id="lIso" checked>等深線</label>
+  <label><input type="checkbox" id="lLit" checked>照らす円</label>
+  <label><input type="checkbox" id="lHoly" checked>極と聖地</label>
+  <button id="home">中心へ</button>
+  <span class="hint">ドラッグで移動、ホイールで拡大、F2 でデバッグ表示</span>
+</header>
+<div id="box">
+  <canvas id="map"></canvas>
+  <div id="hud"></div>
+  <div id="dbg" hidden></div>
+  <div id="note">地形は仮の生成式（地形工房からの書き出しは試作3）</div>
+</div>
+<script>
+"use strict";
+const SRC=document.currentScript.textContent;
+/*GEN1*/
+/* ---------- noise toolbox (same as 地形工房) ---------- */
+const G=[[1,0],[-1,0],[0,1],[0,-1],[.7071,.7071],[-.7071,.7071],[.7071,-.7071],[-.7071,-.7071]];
+function ih(ix,iy,s){let h=Math.imul(ix|0,0x27d4eb2d)^Math.imul(iy|0,0x165667b1)^Math.imul(s|0,0x9e3779b1);h=Math.imul(h^(h>>>15),0x85ebca6b);h=Math.imul(h^(h>>>13),0xc2b2ae35);return (h^(h>>>16))>>>0;}
+function noise(x,y,s){const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy;
+  const u=fx*fx*fx*(fx*(fx*6-15)+10),v=fy*fy*fy*(fy*(fy*6-15)+10);
+  const g00=G[ih(ix,iy,s)&7],g10=G[ih(ix+1,iy,s)&7],g01=G[ih(ix,iy+1,s)&7],g11=G[ih(ix+1,iy+1,s)&7];
+  const n00=g00[0]*fx+g00[1]*fy,n10=g10[0]*(fx-1)+g10[1]*fy,n01=g01[0]*fx+g01[1]*(fy-1),n11=g11[0]*(fx-1)+g11[1]*(fy-1);
+  const a=n00+(n10-n00)*u,b=n01+(n11-n01)*u;return (a+(b-a)*v)*1.6;}
+function fbm(x,y,s,oct,gain){let sum=0,amp=1,f=1;for(let i=0;i<oct;i++){sum+=amp*noise(x*f+i*17.31,y*f-i*9.17,s+i*101);amp*=gain;f*=2;}return sum*0.6;}
+function ridged(x,y,s,oct){let sum=0,amp=1,f=1,norm=0;for(let i=0;i<oct;i++){const n=1-Math.abs(noise(x*f+i*7.7,y*f+i*3.1,s+i*131));sum+=amp*n*n;norm+=amp;amp*=.5;f*=2;}return sum/norm;}
+function smooth(a,b,v){let t=(v-a)/(b-a);t=t<0?0:t>1?1:t;return t*t*(3-2*t);}
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+/* ---------- stand-in terrain: a fixed function of the world position, so every level samples the same ground ---------- */
+const LIT_KM=2200;
+function heightAt(X,Y,seed){            // X east, Y north in metres -> height in metres
+  const x=X/1e3,y=Y/1e3,r=Math.hypot(x,y);
+  const wx=fbm(x/900,y/900,seed+1,4,.5)*260,wy=fbm(x/900+5.2,y/900+1.3,seed+2,4,.5)*260;
+  let s=fbm((x+wx)/1300,(y+wy)/1300,seed,8,.5);
+  s+=.16*smooth(LIT_KM*1.6,LIT_KM*.7,r)-.13;        // the lit world holds the continents; outside, a wide ocean with scattered frontier land
+  let e;
+  if(s>=0){const m=ridged(x/260,y/260,seed+7,7);e=40+1900*s+2600*m*m*smooth(.04,.3,s);}
+  else if(s>=-.035) e=-140*(-s/.035);
+  else if(s>=-.1) e=-140-3560*smooth(0,1,(-s-.035)/.065);
+  else e=-3700-700*smooth(0,.25,-s-.1);
+  const d=fbm(x/45,y/45,seed+3,6,.5);
+  e+=d*(s>=0?90+160*smooth(0,.25,s):60);
+  e+=fbm(x/3,y/3,seed+4,4,.5)*(s>=0?14:6);
+  if(e<-2500){const sm=ridged(x/120,y/120,seed+11,4);e+=2200*Math.pow(Math.max(0,sm-.72)/.28,2);}
+  if(r>LIT_KM*1.3&&e>=0) e*=1+.6*smooth(LIT_KM*1.3,LIT_KM*3,r);   // the frontier is harsher: taller, colder land
+  return e;
+}
+/*GEN2*/
+/* ---------- worker: fills one tile (N cells + a 1-cell skirt all round, north row first) ---------- */
+const WORKER_SRC=SRC.slice(SRC.indexOf("/*GEN1*/"),SRC.indexOf("/*GEN2*/"))+`
+onmessage=e=>{const {id,z,i,j,N,seed,T0}=e.data,T=T0/Math.pow(2,z),s=T/N,M=N+2,E=new Float32Array(M*M);
+  for(let r=0;r<M;r++){const Y=(j+1)*T-(r-.5)*s;for(let c=0;c<M;c++){E[r*M+c]=heightAt(i*T+(c-.5)*s,Y,seed);}}
+  postMessage({id,buf:E.buffer},[E.buffer]);};`;
+
+/* ---------- settings and view ---------- */
+const S={seed:7,finest:10,shade:1,N:256,T0:8388608,litR:2200e3,baseLevel:6};
+const HOLY=[{n:"極",x:0,y:0,pole:true},{n:"聖地A",x:-520e3,y:340e3},{n:"聖地B",x:610e3,y:-180e3},{n:"聖地C",x:120e3,y:-700e3}];
+const layers={lContour:true,lIso:true,lLit:true,lHoly:true};
+const view={mode:"plane",x:0,y:0,zoom:1.2,lu:0,lv:0,lz:0};   // plane: centre (m) + zoom (m/px = 32768/2^zoom); log chart: centre (rad, ln r/R0) + zoom
+const $=id=>document.getElementById(id);
+const box=$("box"),mapC=$("map"),hud=$("hud"),dbg=$("dbg");
+function tileSize(z){return S.T0/Math.pow(2,z);}
+function mpp(){return 32768/Math.pow(2,view.zoom);}
+function landStepFor(z){return z<=2?1000:z<=4?500:z<=6?250:z<=8?100:z<=10?50:20;}
+const ISO=[-200,-1000,-2000,-3000,-4000,-5000,-6000];
+
+/* ---------- tile store: generated on demand by a worker pool, kept in an LRU ---------- */
+const store=new Map(),queue=[];let tick=0,inflight=0;
+const pool=[];
+function makeWorkers(){
+  const n=Math.max(1,Math.min(8,(navigator.hardwareConcurrency||4)-1)),url=URL.createObjectURL(new Blob([WORKER_SRC],{type:"text/javascript"}));
+  for(let k=0;k<n;k++){const w=new Worker(url);w.busy=false;w.onmessage=e=>{const rec=store.get(e.data.id);w.busy=false;inflight--;
+    if(rec&&rec.seed===S.seed){rec.E=new Float32Array(e.data.buf);rec.pending=false;rec.img=null;schedule();}
+    pump();};pool.push(w);}
+}
+function pump(){
+  queue.sort((a,b)=>b.pri-a.pri);
+  for(const w of pool){if(w.busy) continue;let rec;while(queue.length){const q=queue.pop();if(q.seed===S.seed&&!q.E&&q.pending){rec=q;break;}}
+    if(!rec) return;w.busy=true;inflight++;w.postMessage({id:rec.key,z:rec.z,i:rec.i,j:rec.j,N:S.N,seed:S.seed,T0:S.T0});}
+}
+function tileGet(z,i,j,pri){
+  const key=z+"/"+i+"/"+j;let rec=store.get(key);
+  if(!rec){rec={key,z,i,j,E:null,img:null,pending:true,seed:S.seed,pri:0};store.set(key,rec);queue.push(rec);}
+  rec.last=++tick;rec.pri=pri||0;
+  if(rec.pending&&!rec.E) pump();
+  return rec;
+}
+function trimStore(){
+  if(store.size<=420) return;
+  const recs=[...store.values()].filter(r=>!r.pending||r.E).sort((a,b)=>a.last-b.last);
+  for(let k=0;k<recs.length-320;k++) store.delete(recs[k].key);lastTile.E=null;
+}
+
+/* ---------- painting a height grid: tints, Swiss-style shading, then contours ---------- */
+function landCol(e){const t=clamp(e/3200,0,1);return [233-40*t-10*t*t,221-50*t,191-62*t];}
+function seaCol(e){const d=-e;if(d<200){const t=d/200;return [214-8*t,222-6*t,206-2*t];}const t=clamp((d-200)/5800,0,1);return [196-80*t,212-72*t,204-60*t];}
+// E has a 1-cell skirt; spacing(r,c) gives metres per cell; writes the (M-2)x(M-2) core into img
+function shadeInto(img,E,M,spacing){
+  const d=img.data,W=M-2,str=S.shade;
+  for(let r=1;r<M-1;r++)for(let c=1;c<M-1;c++){
+    const k=r*M+c,e=E[k];const o=((r-1)*W+(c-1))*4;
+    if(!(e===e)){d[o]=239;d[o+1]=229;d[o+2]=207;d[o+3]=255;continue;}
+    const sp=spacing(r,c),col=e>=0?landCol(e):seaCol(e);
+    const gx=(E[k+1]-E[k-1])/(2*sp),gy=(E[k-M]-E[k+M])/(2*sp);            // east and north slopes
+    const pxKm=sp/1000,zf=Math.max(1,Math.sqrt(.5/pxKm));                 // close up the real slopes are steep: tone the shading down
+    const amp=e>=0?(.16+.2*clamp(e/2500,0,1)):.10;                        // aerial perspective: stronger high up, calm on the plains and the sea
+    const sh=clamp((-gx+gy)/((e>=0?28:60)*zf),-1,1)*amp*str;              // light from the north-west
+    let R,Gc,B;
+    if(sh>=0){R=col[0]*(1+sh)+14*sh;Gc=col[1]*(1+sh*.9)+4*sh;B=col[2]*(1+sh*.55);}   // warm light
+    else{const k2=1+sh;R=col[0]*k2;Gc=col[1]*(k2+.01);B=col[2]*(k2+.08)+8*(-sh);}      // cool shadow
+    d[o]=R;d[o+1]=Gc;d[o+2]=B;d[o+3]=255;
+  }
+}
+// marching squares over the whole grid; seg(x1,y1,x2,y2) gets grid coordinates (cell centres at +.5)
+function isoSegs(E,M,N2,t,seg){
+  for(let r=0;r<N2-1;r++){let k=r*M,a0=E[k],d0=E[k+M];
+    for(let c=0;c<M-1;c++,k++){const a1=E[k+1],d1=E[k+M+1],A=a0>=t,B=a1>=t,D=d0>=t,F=d1>=t;
+      const ea=a0,eb=a1,ed=d0,ee=d1;a0=a1;d0=d1;
+      const code=(A?8:0)|(B?4:0)|(F?2:0)|(D?1:0);if(code===0||code===15||ea!==ea||eb!==eb||ed!==ed||ee!==ee) continue;
+      const Tx=c+(t-ea)/(eb-ea),Rz=r+(t-eb)/(ee-eb),Bx=c+(t-ed)/(ee-ed),Lz=r+(t-ea)/(ed-ea);
+      switch(code){
+        case 1:case 14:seg(c,Lz,Bx,r+1);break; case 2:case 13:seg(Bx,r+1,c+1,Rz);break;
+        case 3:case 12:seg(c,Lz,c+1,Rz);break; case 4:case 11:seg(Tx,r,c+1,Rz);break;
+        case 6:case 9:seg(Tx,r,Bx,r+1);break; case 7:case 8:seg(c,Lz,Tx,r);break;
+        case 5:seg(c,Lz,Tx,r);seg(Bx,r+1,c+1,Rz);break; case 10:seg(Tx,r,c+1,Rz);seg(c,Lz,Bx,r+1);break;}}}
+}
+// draws coast, isobaths and contours of grid E (M wide, N2 tall) onto ctx; toX/toY map grid coordinates to the ctx
+function drawLines(ctx,E,M,N2,landStep,toX,toY,lw){
+  const iso=(t,color,w)=>{ctx.strokeStyle=color;ctx.lineWidth=w*lw;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
+    isoSegs(E,M,N2,t,(x1,y1,x2,y2)=>{ctx.moveTo(toX(x1+.5),toY(y1+.5));ctx.lineTo(toX(x2+.5),toY(y2+.5));});ctx.stroke();};
+  let mx=-1e9;for(let k=0;k<E.length;k++) if(E[k]>mx) mx=E[k];
+  if(layers.lIso) for(const z of ISO) iso(z,"rgba(63,95,108,.5)",.8);
+  if(layers.lContour) for(let z=landStep;z<=mx;z+=landStep) iso(z,z%(landStep*5)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(landStep*5)===0?1:.7);
+  iso(0,"rgba(239,229,207,.7)",3.2);     // paper halo along the shore, like an engraved chart
+  iso(0,"#3d2b1c",1.4);
+}
+function paintTile(rec){
+  const N=S.N,M=N+2,sp=tileSize(rec.z)/N,cv=document.createElement("canvas");cv.width=cv.height=N;
+  const c=cv.getContext("2d"),img=c.createImageData(N,N);
+  shadeInto(img,rec.E,M,()=>sp);c.putImageData(img,0,0);
+  drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-1,y=>y-1,1);
+  return cv;
+}
+
+/* ---------- plane view: tiles of one level, parents fill in while a tile is still being made ---------- */
+function drawPlane(ctx,W,H){
+  const m=mpp(),z=clamp(Math.round(view.zoom),0,S.finest),T=tileSize(z),px=T/m;
+  const i0=Math.floor((view.x-W/2*m)/T),i1=Math.floor((view.x+W/2*m)/T),j0=Math.floor((view.y-H/2*m)/T),j1=Math.floor((view.y+H/2*m)/T);
+  let shown=0,missing=0;
+  for(let j=j1;j>=j0;j--)for(let i=i0;i<=i1;i++){
+    const rec=tileGet(z,i,j,10-Math.abs(i-(i0+i1)/2)-Math.abs(j-(j0+j1)/2));
+    const sx=W/2+(i*T-view.x)/m,sy=H/2-((j+1)*T-view.y)/m;
+    const X0=Math.round(sx),Y0=Math.round(sy),X1=Math.round(sx+px),Y1=Math.round(sy+px);
+    if(rec.E){if(!rec.img) rec.img=paintTile(rec);ctx.drawImage(rec.img,X0,Y0,X1-X0,Y1-Y0);shown++;continue;}
+    missing++;let done=false;
+    for(let k=1;k<=5&&z-k>=0;k++){const f=1<<k,ia=Math.floor(i/f),ja=Math.floor(j/f),a=store.get((z-k)+"/"+ia+"/"+ja);
+      if(a&&a.E){a.last=++tick;if(!a.img) a.img=paintTile(a);const n=S.N/f,sxs=(i-ia*f)*n,sys=(f-1-(j-ja*f))*n;
+        ctx.drawImage(a.img,sxs,sys,n,n,X0,Y0,X1-X0,Y1-Y0);done=true;break;}}
+    if(!done){ctx.fillStyle="#e6d8bb";ctx.fillRect(X0,Y0,X1-X0,Y1-Y0);}
+  }
+  // the levels above are kept warm so zooming out never shows blank paper
+  if(z>0){const T2=tileSize(z-1);for(let j=Math.floor((view.y-H/2*m)/T2);j<=Math.floor((view.y+H/2*m)/T2);j++)for(let i=Math.floor((view.x-W/2*m)/T2);i<=Math.floor((view.x+W/2*m)/T2);i++) tileGet(z-1,i,j,0);}
+  return {z,shown,missing};
+}
+
+/* ---------- projected views: every screen cell asks the tiles for its height, then the same painter runs ---------- */
+const lastTile={z:-1,i:0,j:0,E:null,zz:0,ii:0,jj:0,TT:0};   // neighbouring samples mostly hit the same tile
+function sampleHeight(X,Y,mLocal){
+  const z=clamp(Math.round(Math.log2(32768/mLocal)),0,S.finest),T=tileSize(z),i=Math.floor(X/T),j=Math.floor(Y/T);
+  let E,zz,ii,jj,TT;
+  if(lastTile.z===z&&lastTile.i===i&&lastTile.j===j&&lastTile.E){E=lastTile.E;zz=lastTile.zz;ii=lastTile.ii;jj=lastTile.jj;TT=lastTile.TT;}
+  else{const rec=tileGet(z,i,j,5);E=rec.E;zz=z;ii=i;jj=j;TT=T;
+    if(!E){for(let k=1;k<=4&&z-k>=0;k++){const f=1<<k,a=store.get((z-k)+"/"+Math.floor(i/f)+"/"+Math.floor(j/f));if(a&&a.E){E=a.E;zz=z-k;ii=Math.floor(i/f);jj=Math.floor(j/f);TT=tileSize(zz);break;}}}
+    if(!E) return NaN;
+    lastTile.z=z;lastTile.i=i;lastTile.j=j;lastTile.E=E;lastTile.zz=zz;lastTile.ii=ii;lastTile.jj=jj;lastTile.TT=TT;}
+  const N=S.N,M=N+2,s=TT/N,gx=(X-ii*TT)/s+.5,gy=((jj+1)*TT-Y)/s+.5;   // skirt cell 0 is centred half a cell outside the tile
+  const x0=clamp(Math.floor(gx),0,M-2),y0=clamp(Math.floor(gy),0,M-2),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),k=y0*M+x0;
+  return (E[k]*(1-fx)+E[k+1]*fx)*(1-fy)+(E[k+M]*(1-fx)+E[k+M+1]*fx)*fy;
+}
+const projC=document.createElement("canvas");
+function drawProjected(ctx,W,H,inv){
+  // inv(sx,sy) -> [X,Y,metresPerPixel] or null outside the chart; computed on a half-resolution grid with a skirt
+  const Q=2,Wg=Math.ceil(W/Q)+2,Hg=Math.ceil(H/Q)+2,M=Wg,E=new Float32Array(Wg*Hg),SPc=new Float32Array(Wg*Hg);
+  let missing=0;
+  for(let r=0;r<Hg;r++)for(let c=0;c<Wg;c++){const p=inv((c-.5)*Q,(r-.5)*Q),k=r*Wg+c;
+    if(!p){E[k]=NaN;SPc[k]=1;continue;}
+    const h=sampleHeight(p[0],p[1],p[2]*Q);E[k]=h;SPc[k]=p[2]*Q;if(!(h===h)) missing++;}
+  projC.width=Wg-2;projC.height=Hg-2;const pc=projC.getContext("2d"),img=pc.createImageData(Wg-2,Hg-2);
+  shadeInto(img,E,M,(r,c)=>SPc[r*Wg+c]);pc.putImageData(img,0,0);
+  ctx.imageSmoothingEnabled=true;ctx.drawImage(projC,0,0,W,H);
+  // contours on the screen at full resolution; the step follows the finest level actually in view
+  const mLoc=[];for(let r=0;r<Hg;r+=8)for(let c=0;c<Wg;c+=8){const p=inv((c-.5)*Q,(r-.5)*Q);if(p) mLoc.push(p[2]);}
+  mLoc.sort((a,b)=>a-b);const mm=mLoc.length?mLoc[Math.floor(mLoc.length*.3)]:1e4;
+  const zEff=clamp(Math.round(Math.log2(32768/mm)),0,S.finest);
+  drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1);
+  return {z:zEff,shown:0,missing};
+}
+function discParams(W,H){return {cx:W/2,cy:H/2,Rm:Math.min(W,H)/2-26,R0:S.litR};}
+const DISC_RMAX=14;   // the chart shows out to 14 lit radii; beyond that nobody has sailed, and the paper fades out
+function discInv(W,H){const {cx,cy,Rm,R0}=discParams(W,H);return (sx,sy)=>{const dx=sx-cx,dy=cy-sy,rho=Math.hypot(dx,dy);if(rho>=Rm*DISC_RMAX/(DISC_RMAX+1)) return null;
+  const r=R0*rho/(Rm-rho),sc=R0*Rm/((Rm-rho)*(Rm-rho));const f=rho>0?r/rho:0;return [dx*f,dy*f,Math.max(sc,R0/Rm)];};}
+function discFwd(W,H,X,Y){const {cx,cy,Rm,R0}=discParams(W,H),r=Math.hypot(X,Y),rho=Rm*r/(r+R0),f=r>0?rho/r:0;return [cx+X*f,cy-Y*f];}
+function logPPR(W){return W/(2*Math.PI)*Math.pow(2,view.lz);}
+function logInv(W,H){const ppr=logPPR(W),R0=S.litR;return (sx,sy)=>{const th=view.lu+(sx-W/2)/ppr,v=view.lv-(sy-H/2)/ppr;if(v>Math.log(60)||v<Math.log(1e-4)) return null;
+  const r=R0*Math.exp(v);return [r*Math.sin(th),r*Math.cos(th),r/ppr];};}
+function logFwd(W,H,X,Y){const ppr=logPPR(W),r=Math.hypot(X,Y);if(r<=0) return null;let th=Math.atan2(X,Y)-view.lu;th=((th+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
+  return [W/2+th*ppr,H/2-(Math.log(r/S.litR)-view.lv)*ppr];}
+
+/* ---------- overlays: the lit circle, the pole and the holy sites, the scale bar ---------- */
+function toScreen(W,H,X,Y){
+  if(view.mode==="plane"){const m=mpp();return [W/2+(X-view.x)/m,H/2-(Y-view.y)/m];}
+  if(view.mode==="disc") return discFwd(W,H,X,Y);
+  return logFwd(W,H,X,Y);
+}
+function drawOverlay(ctx,W,H){
+  ctx.save();ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--body");
+  if(layers.lLit){ctx.strokeStyle="#3d2b1c";ctx.lineWidth=1.4;ctx.setLineDash([6,5]);ctx.beginPath();
+    if(view.mode==="plane"){const m=mpp(),[ox,oy]=toScreen(W,H,0,0),R=S.litR/m;if(R<4e4) ctx.arc(ox,oy,R,0,6.2832);}
+    else if(view.mode==="disc"){const {cx,cy,Rm}=discParams(W,H);ctx.arc(cx,cy,Rm/2,0,6.2832);ctx.moveTo(cx+Rm,cy);ctx.arc(cx,cy,Rm,0,6.2832);}
+    else{const p=logFwd(W,H,S.litR,0);if(p){ctx.moveTo(0,p[1]);ctx.lineTo(W,p[1]);}}
+    ctx.stroke();ctx.setLineDash([]);}
+  if(layers.lHoly){for(const h of HOLY){const p=toScreen(W,H,h.x,h.y);if(!p||p[0]<-20||p[0]>W+20||p[1]<-20||p[1]>H+20) continue;
+    ctx.fillStyle="#efe5cf";ctx.strokeStyle=h.pole?"#a4472b":"#3d2b1c";ctx.lineWidth=1.6;ctx.beginPath();
+    if(h.pole){ctx.arc(p[0],p[1],6,0,6.2832);ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(p[0],p[1],2,0,6.2832);ctx.fillStyle="#a4472b";ctx.fill();}
+    else{for(let k=0;k<8;k++){const a=k*Math.PI/4,rr=k%2?3:8;ctx.lineTo(p[0]+rr*Math.sin(a),p[1]-rr*Math.cos(a));}ctx.closePath();ctx.fill();ctx.stroke();}
+    const tw=ctx.measureText(h.n).width;ctx.fillStyle="rgba(239,229,207,.85)";ctx.fillRect(p[0]+9,p[1]-9,tw+6,16);ctx.fillStyle=h.pole?"#a4472b":"#3d2b1c";ctx.fillText(h.n,p[0]+12,p[1]+3);}}
+  if(view.mode==="plane"){const m=mpp();let km=Math.pow(10,Math.floor(Math.log10(m*W*.25/1000)));if(km*2.5*1000/m<W*.25) km*=2.5;else if(km*2*1000/m<W*.25) km*=2;
+    const L=km*1000/m,x0=14,y0=H-18;ctx.strokeStyle="#3d2b1c";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x0+L,y0);ctx.moveTo(x0,y0-5);ctx.lineTo(x0,y0+3);ctx.moveTo(x0+L,y0-5);ctx.lineTo(x0+L,y0+3);ctx.stroke();
+    ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.fillText(km>=1?km+" km":Math.round(km*1000)+" m",x0+L+10,y0+4);}
+  if(view.mode==="log"){ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.strokeStyle="rgba(61,43,28,.35)";ctx.lineWidth=1;const ppr=logPPR(W);
+    for(let d=0;d<360;d+=30){const th=d*Math.PI/180;let x=W/2+(((th-view.lu+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI)*ppr;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();ctx.fillText("θ "+d+"°",x+4,14);}
+    for(const rk of [100,250,500,1000,2200,5000,10000,25000,50000]){const p=logFwd(W,H,rk*1e3,0);if(!p||p[1]<0||p[1]>H) continue;ctx.beginPath();ctx.moveTo(0,p[1]);ctx.lineTo(W,p[1]);ctx.stroke();ctx.fillText("r "+rk.toLocaleString()+" km",6,p[1]-4);}}
+  if(view.mode==="disc"){const {cx,cy,Rm}=discParams(W,H),re=Rm*DISC_RMAX/(DISC_RMAX+1),g=ctx.createRadialGradient(cx,cy,re*.9,cx,cy,re);
+    g.addColorStop(0,"rgba(239,229,207,0)");g.addColorStop(1,"rgba(239,229,207,1)");ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,Rm,0,6.2832);ctx.fill();
+    ctx.fillStyle="#6b5440";ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--body");ctx.textAlign="center";ctx.fillText("縁が無限遠。照らす円は内側の半分",cx,cy+Rm+18);ctx.textAlign="start";}
+  ctx.restore();
+}
+
+/* ---------- render loop ---------- */
+let needRender=false,renderTimer=0,stats={z:0,shown:0,missing:0,ms:0};
+function schedule(){if(renderTimer) return;renderTimer=setTimeout(()=>{renderTimer=0;render();},40);}
+function render(){
+  const dpr=Math.min(devicePixelRatio||1,2),W=box.clientWidth,H=box.clientHeight;
+  if(mapC.width!==Math.round(W*dpr)||mapC.height!==Math.round(H*dpr)){mapC.width=Math.round(W*dpr);mapC.height=Math.round(H*dpr);}
+  const ctx=mapC.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.fillStyle="#efe5cf";ctx.fillRect(0,0,W,H);
+  const t0=performance.now();
+  if(view.mode==="plane") stats=drawPlane(ctx,W,H);
+  else if(view.mode==="disc") stats=drawProjected(ctx,W,H,discInv(W,H));
+  else stats=drawProjected(ctx,W,H,logInv(W,H));
+  stats.ms=performance.now()-t0;
+  drawOverlay(ctx,W,H);trimStore();updateHud();
+}
+
+/* ---------- readout: where the cursor is, in every coordinate system of the design ---------- */
+let cursor=null;
+function invScreen(W,H,sx,sy){
+  if(view.mode==="plane"){const m=mpp();return [view.x+(sx-W/2)*m,view.y-(sy-H/2)*m,m];}
+  if(view.mode==="disc") return discInv(W,H)(sx,sy);
+  return logInv(W,H)(sx,sy);
+}
+function fmtKm(v){return (v/1000).toFixed(v<1e6?1:0)+" km";}
+function updateHud(){
+  const W=box.clientWidth,H=box.clientHeight;let s="";
+  const modeName={plane:"平面",disc:"全体図（円盤）",log:"海図（対数極）"}[view.mode];
+  s+=modeName+(view.mode==="plane"?"  1 px = "+(mpp()>=1000?(mpp()/1000).toFixed(2)+" km":Math.round(mpp())+" m")+"  レベル "+stats.z:"")+"\n";
+  const p=cursor&&invScreen(W,H,cursor[0],cursor[1]);
+  if(p){const [X,Y]=p,r=Math.hypot(X,Y),th=(Math.atan2(X,Y)*180/Math.PI+360)%360,h=sampleHeight(X,Y,p[2]);
+    s+="工学座標  X "+fmtKm(X)+"  Y "+fmtKm(Y)+"\n極座標    r "+fmtKm(r)+"  θ "+th.toFixed(1)+"°  "+(r<=S.litR?"照らされた世界":"辺境")+"\n";
+    const A=HOLY[1],B=HOLY[2],dA=Math.hypot(X-A.x,Y-A.y),dB=Math.hypot(X-B.x,Y-B.y);
+    const g=Math.acos(clamp(((A.x-X)*(B.x-X)+(A.y-Y)*(B.y-Y))/(dA*dB),-1,1))*180/Math.PI;
+    s+="航海者の座標  明るさの比 k "+(dA/dB).toFixed(3)+"  見込み角 γ "+g.toFixed(2)+"°\n";
+    s+="標高 "+(h===h?Math.round(h)+" m":"（まだ）");}
+  else s+="カーソルを地図に";
+  hud.textContent=s;
+  if(!dbg.hidden){let busy=0;for(const w of pool) if(w.busy) busy++;
+    dbg.textContent="[debug] F2で隠す\nview "+JSON.stringify({mode:view.mode,x:Math.round(view.x),y:Math.round(view.y),zoom:+view.zoom.toFixed(3),lu:+view.lu.toFixed(3),lv:+view.lv.toFixed(3),lz:+view.lz.toFixed(2)})+
+      "\ntiles cached "+store.size+"  queued "+queue.length+"  workers busy "+busy+"/"+pool.length+"\nshown "+stats.shown+"  waiting "+stats.missing+"  draw "+stats.ms.toFixed(1)+" ms  size "+W+"x"+H;}
+}
+
+/* ---------- interaction ---------- */
+let drag=null;
+box.addEventListener("pointerdown",ev=>{if(ev.button!==0&&ev.pointerType==="mouse") return;box.setPointerCapture(ev.pointerId);drag={x:ev.clientX,y:ev.clientY};box.classList.add("drag");});
+box.addEventListener("pointermove",ev=>{const r=box.getBoundingClientRect();cursor=[ev.clientX-r.left,ev.clientY-r.top];
+  if(drag){const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;drag={x:ev.clientX,y:ev.clientY};
+    if(view.mode==="plane"){const m=mpp();view.x-=dx*m;view.y+=dy*m;}
+    else if(view.mode==="log"){const ppr=logPPR(box.clientWidth);view.lu-=dx/ppr;view.lv+=dy/ppr;}
+    schedule();}
+  else updateHud();});
+const endDrag=()=>{drag=null;box.classList.remove("drag");saveView();};
+box.addEventListener("pointerup",endDrag);box.addEventListener("pointercancel",endDrag);
+box.addEventListener("wheel",ev=>{ev.preventDefault();const r=box.getBoundingClientRect(),sx=ev.clientX-r.left,sy=ev.clientY-r.top,f=Math.exp(-ev.deltaY*.0015);
+  if(view.mode==="plane"){const m=mpp(),X=view.x+(sx-r.width/2)*m,Y=view.y-(sy-r.height/2)*m;
+    view.zoom=clamp(view.zoom+Math.log2(f),-3,S.finest+1);const m2=mpp();view.x=X-(sx-r.width/2)*m2;view.y=Y+(sy-r.height/2)*m2;}
+  else if(view.mode==="log"){const p0=logPPR(r.width);view.lz=clamp(view.lz+Math.log2(f),-1,8);const p1=logPPR(r.width);
+    view.lu+=(sx-r.width/2)*(1/p0-1/p1);view.lv-=(sy-r.height/2)*(1/p0-1/p1);}
+  schedule();saveView();},{passive:false});
+let pinch=null;
+box.addEventListener("touchstart",ev=>{if(ev.touches.length===2){pinch=Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY);drag=null;}},{passive:true});
+box.addEventListener("touchmove",ev=>{if(ev.touches.length===2&&pinch){const d=Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY);
+  if(view.mode==="plane") view.zoom=clamp(view.zoom+Math.log2(d/pinch),-3,S.finest+1);else if(view.mode==="log") view.lz=clamp(view.lz+Math.log2(d/pinch),-1,8);pinch=d;schedule();}},{passive:true});
+box.addEventListener("touchend",()=>{pinch=null;});
+window.addEventListener("keydown",ev=>{if(ev.key==="F2"){ev.preventDefault();dbg.hidden=!dbg.hidden;updateHud();}
+  if(ev.key==="+"||ev.key==="="){view.zoom=clamp(view.zoom+.5,-3,S.finest+1);schedule();}if(ev.key==="-"){view.zoom=clamp(view.zoom-.5,-3,S.finest+1);schedule();}});
+function setMode(m){view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"]]) $(id).classList.toggle("on",k===m);schedule();saveView();}
+$("mPlane").onclick=()=>setMode("plane");$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
+$("home").onclick=()=>{view.x=0;view.y=0;view.zoom=1.2;view.lu=0;view.lv=0;view.lz=0;schedule();saveView();};
+function resetTiles(){store.clear();queue.length=0;lastTile.E=null;schedule();}
+$("seed").onchange=()=>{S.seed=+$("seed").value|0;resetTiles();saveView();};
+$("reseed").onclick=()=>{$("seed").value=Math.floor(Math.random()*1e6);$("seed").onchange();};
+$("finest").onchange=()=>{S.finest=clamp(+$("finest").value|0,6,12);$("finest").value=S.finest;schedule();saveView();};
+$("shade").oninput=()=>{S.shade=+$("shade").value/100;for(const r of store.values()) r.img=null;schedule();};
+for(const k of Object.keys(layers)) $(k).onchange=()=>{layers[k]=$(k).checked;for(const r of store.values()) r.img=null;schedule();};
+function saveView(){try{localStorage.setItem("sf-flatmap-1",JSON.stringify({view,seed:S.seed,finest:S.finest}));}catch(e){}}
+(function load(){try{const s=JSON.parse(localStorage.getItem("sf-flatmap-1"));if(s){Object.assign(view,s.view);S.seed=s.seed;S.finest=s.finest;$("seed").value=S.seed;$("finest").value=S.finest;}}catch(e){}})();
+new ResizeObserver(()=>schedule()).observe(box);
+makeWorkers();setMode(view.mode);
+</script>
+</body>
+</html>
