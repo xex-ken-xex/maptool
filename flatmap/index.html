@@ -3,13 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>平面世界の地図 試作1</title>
+<title>平面世界の地図 試作2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono&display=swap">
 <style>
 :root{
   --paper:#efe5cf; --paper-2:#e6d8bb; --paper-3:#d9c7a3;
   --ink:#3d2b1c; --ink-2:#6b5440; --ink-3:#9a8166;
   --sea:#7d9496; --rust:#a4472b; --blue:#3f6b7a;
-  --body:"BIZ UDPGothic","Hiragino Sans","Noto Sans JP",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --body:"BIZ UDPGothic","Hiragino Sans","Noto Sans JP",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace; --name:"Cormorant Garamond","Times New Roman",serif;
 }
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
@@ -35,7 +37,7 @@ input[type=range]{width:90px}
 </head>
 <body>
 <header>
-  <h1>平面世界の地図 試作1</h1>
+  <h1>平面世界の地図 試作2</h1>
   <span class="grp">
     <button id="mPlane" class="on" title="工学座標そのまま。距離と方位がどこでも正確">平面</button>
     <button id="mLog" title="横が極の周りの向き、縦が極からの距離の対数。羅針盤一定の航路が直線になる海図">海図（対数極）</button>
@@ -47,6 +49,9 @@ input[type=range]{width:90px}
   <label>陰影 <input type="range" id="shade" min="0" max="200" value="100"></label>
   <label><input type="checkbox" id="lContour" checked>等高線</label>
   <label><input type="checkbox" id="lIso" checked>等深線</label>
+  <label><input type="checkbox" id="lWave" checked>水線</label>
+  <label><input type="checkbox" id="lRiver" checked>川と湖</label>
+  <label><input type="checkbox" id="lLabel" checked>地名</label>
   <label><input type="checkbox" id="lLit" checked>照らす円</label>
   <label><input type="checkbox" id="lHoly" checked>極と聖地</label>
   <button id="home">中心へ</button>
@@ -56,7 +61,7 @@ input[type=range]{width:90px}
   <canvas id="map"></canvas>
   <div id="hud"></div>
   <div id="dbg" hidden></div>
-  <div id="note">地形は仮の生成式（地形工房からの書き出しは試作3）</div>
+  <div id="note">地形と地名は仮の生成（地形工房からの書き出しは試作3）</div>
 </div>
 <script>
 "use strict";
@@ -65,6 +70,7 @@ const SRC=document.currentScript.textContent;
 /* ---------- noise toolbox (same as 地形工房) ---------- */
 const G=[[1,0],[-1,0],[0,1],[0,-1],[.7071,.7071],[-.7071,.7071],[.7071,-.7071],[-.7071,-.7071]];
 function ih(ix,iy,s){let h=Math.imul(ix|0,0x27d4eb2d)^Math.imul(iy|0,0x165667b1)^Math.imul(s|0,0x9e3779b1);h=Math.imul(h^(h>>>15),0x85ebca6b);h=Math.imul(h^(h>>>13),0xc2b2ae35);return (h^(h>>>16))>>>0;}
+function rnd(i,j,s){return ih(i,j,s)/4294967296;}
 function noise(x,y,s){const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy;
   const u=fx*fx*fx*(fx*(fx*6-15)+10),v=fy*fy*fy*(fy*(fy*6-15)+10);
   const g00=G[ih(ix,iy,s)&7],g10=G[ih(ix+1,iy,s)&7],g01=G[ih(ix,iy+1,s)&7],g11=G[ih(ix+1,iy+1,s)&7];
@@ -87,23 +93,98 @@ function heightAt(X,Y,seed){            // X east, Y north in metres -> height i
   else if(s>=-.1) e=-140-3560*smooth(0,1,(-s-.035)/.065);
   else e=-3700-700*smooth(0,.25,-s-.1);
   const d=fbm(x/45,y/45,seed+3,6,.5);
-  e+=d*(s>=0?90+160*smooth(0,.25,s):60);
+  e+=(s>=0?(d>0?d*(90+160*smooth(0,.25,s)):d*35):d*60);
   e+=fbm(x/3,y/3,seed+4,4,.5)*(s>=0?14:6);
   if(e<-2500){const sm=ridged(x/120,y/120,seed+11,4);e+=2200*Math.pow(Math.max(0,sm-.72)/.28,2);}
   if(r>LIT_KM*1.3&&e>=0) e*=1+.6*smooth(LIT_KM*1.3,LIT_KM*3,r);   // the frontier is harsher: taller, colder land
   return e;
 }
+/* ---------- hydrology on a coarse grid of the lit world: fill the pits, follow the water, find rivers, lakes, land masses and peaks ---------- */
+function hydro(H,n,C,X0,Y0){
+  const N2=n*n,F=new Float32Array(H),closed=new Uint8Array(N2),order=new Int32Array(N2);let no=0;
+  // binary heap keyed by elevation
+  const hk=new Float32Array(N2),hi=new Int32Array(N2);let hn=0;
+  const push=(k,i)=>{let p=hn++;hk[p]=k;hi[p]=i;while(p>0){const q=(p-1)>>1;if(hk[q]<=hk[p]) break;const tk=hk[q],ti=hi[q];hk[q]=hk[p];hi[q]=hi[p];hk[p]=tk;hi[p]=ti;p=q;}};
+  const pop=()=>{const i=hi[0];hn--;if(hn>0){hk[0]=hk[hn];hi[0]=hi[hn];let p=0;for(;;){let l=2*p+1,r=l+1,m=p;if(l<hn&&hk[l]<hk[m]) m=l;if(r<hn&&hk[r]<hk[m]) m=r;if(m===p) break;const tk=hk[m],ti=hi[m];hk[m]=hk[p];hi[m]=hi[p];hk[p]=tk;hi[p]=ti;p=m;}}return i;};
+  const NB=[-1,1,-n,n,-n-1,-n+1,n-1,n+1];
+  for(let k=0;k<N2;k++){if(H[k]<0){closed[k]=1;continue;}const r=(k/n)|0,c=k%n;
+    if(r===0||c===0||r===n-1||c===n-1){closed[k]=1;push(H[k],k);continue;}
+    if(H[k-1]<0||H[k+1]<0||H[k-n]<0||H[k+n]<0){closed[k]=1;push(H[k],k);}}
+  while(hn>0){const k=pop();order[no++]=k;const r=(k/n)|0,c=k%n;
+    for(let q=0;q<8;q++){const d=NB[q];const rr=r+((d===-n||d===-n-1||d===-n+1)?-1:(d===n||d===n-1||d===n+1)?1:0),cc=c+((d===-1||d===-n-1||d===n-1)?-1:(d===1||d===-n+1||d===n+1)?1:0);
+      if(rr<0||cc<0||rr>=n||cc>=n) continue;const m=k+d;if(closed[m]) continue;closed[m]=1;
+      F[m]=Math.max(H[m],F[k]+1e-3);push(F[m],m);}}
+  // downstream cell and accumulation (cells), highest first
+  const down=new Int32Array(N2).fill(-1),acc=new Float32Array(N2);
+  for(let t=no-1;t>=0;t--){const k=order[t],r=(k/n)|0,c=k%n;let best=-1,bs=0;
+    for(let q=0;q<8;q++){const d=NB[q];const rr=r+((d===-n||d===-n-1||d===-n+1)?-1:(d===n||d===n-1||d===n+1)?1:0),cc=c+((d===-1||d===-n-1||d===n-1)?-1:(d===1||d===-n+1||d===n+1)?1:0);
+      if(rr<0||cc<0||rr>=n||cc>=n) continue;const m=k+d,fm=H[m]<0?H[m]:F[m],sl=(F[k]-fm)/(q<4?1:1.4142);if(sl>bs){bs=sl;best=m;}}
+    down[k]=best;acc[k]+=1;if(best>=0) acc[best]+=acc[k];}
+  // lakes: where the fill raised the ground
+  const lake=new Float32Array(N2).fill(NaN);for(let k=0;k<N2;k++) if(H[k]>=0&&F[k]-H[k]>.6) lake[k]=F[k];
+  // land masses: 4-connected land, named at the cell farthest from the shore
+  const comp=new Int32Array(N2).fill(-1),lands=[];const stack=new Int32Array(N2);
+  const dist=edt(H,n,n,k=>H[k]<0);          // distance to the sea for land cells
+  for(let k=0;k<N2;k++){if(H[k]<0||comp[k]>=0) continue;const id=lands.length;let sp=0,area=0,best=k,bd=-1;stack[sp++]=k;comp[k]=id;
+    while(sp>0){const m=stack[--sp];area++;if(dist[m]>bd){bd=dist[m];best=m;}const r=(m/n)|0,c=m%n;
+      const cand=[c>0?m-1:-1,c<n-1?m+1:-1,r>0?m-n:-1,r<n-1?m+n:-1];for(const q of cand) if(q>=0&&H[q]>=0&&comp[q]<0){comp[q]=id;stack[sp++]=q;}}
+    lands.push({area:area*C*C,x:X0+(best%n+.5)*C,y:Y0-(((best/n)|0)+.5)*C,w:bd*C,id});}
+  // lakes as components
+  const lcomp=new Int32Array(N2).fill(-1),lakes=[];
+  for(let k=0;k<N2;k++){if(!(lake[k]===lake[k])||lcomp[k]>=0) continue;const id=lakes.length;let sp=0,area=0,sx=0,sy=0,depth=0;stack[sp++]=k;lcomp[k]=id;
+    while(sp>0){const m=stack[--sp];area++;sx+=m%n;sy+=(m/n)|0;if(F[m]-H[m]>depth) depth=F[m]-H[m];const r=(m/n)|0,c=m%n;
+      const cand=[c>0?m-1:-1,c<n-1?m+1:-1,r>0?m-n:-1,r<n-1?m+n:-1];for(const q of cand) if(q>=0&&lake[q]===lake[q]&&lcomp[q]<0){lcomp[q]=id;stack[sp++]=q;}}
+    if(area<6||depth<30){for(let q=0;q<N2;q++) if(lcomp[q]===id){lake[q]=NaN;lcomp[q]=-2;}continue;}
+    lakes.push({area:area*C*C,x:X0+(sx/area+.5)*C,y:Y0-(sy/area+.5)*C,id});}
+  lakes.sort((a,b)=>b.area-a.area);if(lakes.length>400){const keep=new Set(lakes.slice(0,400).map(l=>l.id));for(let q=0;q<N2;q++) if(lcomp[q]>=0&&!keep.has(lcomp[q])) lake[q]=NaN;lakes.length=400;}
+  // rivers: from each mouth upstream along the biggest feeder (the main stem), then the tributaries that join it
+  const thr=40,inRiver=new Uint8Array(N2),pts=[],rivers=[];
+  const isRiv=k=>H[k]>=0&&acc[k]>=thr&&!(lake[k]===lake[k]);
+  const nbrs=(k,fn)=>{const r=(k/n)|0,c=k%n;for(let q=0;q<8;q++){const d=NB[q];const rr=r+((d===-n||d===-n-1||d===-n+1)?-1:(d===n||d===n-1||d===n+1)?1:0),cc=c+((d===-1||d===-n-1||d===n-1)?-1:(d===1||d===-n+1||d===n+1)?1:0);
+    if(rr<0||cc<0||rr>=n||cc>=n) continue;fn(k+d);}};
+  const upOf=k=>{let best=-1,ba=0;nbrs(k,m=>{if(down[m]===k&&isRiv(m)&&!inRiver[m]&&acc[m]>ba){ba=acc[m];best=m;}});return best;};
+  const trace=(k0,endPt)=>{const line=[];if(endPt>=0) line.push(endPt);let k=k0;while(k>=0&&!inRiver[k]){inRiver[k]=1;line.push(k);k=upOf(k);}
+    if(line.length<3) return;line.reverse();const st=pts.length;for(const q of line) pts.push(X0+(q%n+.5)*C,Y0-(((q/n)|0)+.5)*C,acc[q]);rivers.push({st,en:pts.length,mx:acc[k0]});};
+  const mouths=[];for(let k=0;k<N2;k++){if(!isRiv(k)) continue;const d=down[k];if(d<0||!isRiv(d)) mouths.push(k);}
+  mouths.sort((a,b)=>acc[b]-acc[a]);
+  for(const m of mouths){const d=down[m];trace(m,d>=0&&(H[d]<0||lake[d]===lake[d])?d:-1);}
+  for(let pass=0;pass<40;pass++){let more=false;for(let k=0;k<N2;k++){if(!isRiv(k)||inRiver[k]) continue;const d=down[k];if(d>=0&&inRiver[d]){trace(k,d);more=true;}}if(!more) break;}
+  // peaks: local maxima of the coarse grid
+  const peaks=[];for(let r=3;r<n-3;r++)for(let c=3;c<n-3;c++){const k=r*n+c,h=H[k];if(h<2200) continue;let top=true;
+    for(let dr=-3;dr<=3&&top;dr++)for(let dc=-3;dc<=3;dc++){if(dr===0&&dc===0) continue;if(H[k+dr*n+dc]>=h){top=false;break;}}
+    if(top) peaks.push({x:X0+(c+.5)*C,y:Y0-(r+.5)*C,h});}
+  peaks.sort((a,b)=>b.h-a.h);
+  return {lake,pts:new Float32Array(pts),rivers,lands,lakes,peaks:peaks.slice(0,80)};
+}
+// Felzenszwalb distance transform: distance (in cells) from each cell to the nearest cell where isZero(k) holds
+function edt(H,W,Hh,isZero){
+  const INF=1e12,f=new Float64Array(W*Hh);for(let k=0;k<W*Hh;k++) f[k]=isZero(k)?0:INF;
+  const n=Math.max(W,Hh),d=new Float64Array(n),v=new Int32Array(n),z=new Float64Array(n+1),g=new Float64Array(n);
+  const dt=(len)=>{let k=0;v[0]=0;z[0]=-INF;z[1]=INF;
+    for(let q=1;q<len;q++){let s=((g[q]+q*q)-(g[v[k]]+v[k]*v[k]))/(2*q-2*v[k]);while(s<=z[k]){k--;s=((g[q]+q*q)-(g[v[k]]+v[k]*v[k]))/(2*q-2*v[k]);}k++;v[k]=q;z[k]=s;z[k+1]=INF;}
+    k=0;for(let q=0;q<len;q++){while(z[k+1]<q) k++;d[q]=(q-v[k])*(q-v[k])+g[v[k]];}};
+  for(let c=0;c<W;c++){for(let r=0;r<Hh;r++) g[r]=f[r*W+c];dt(Hh);for(let r=0;r<Hh;r++) f[r*W+c]=d[r];}
+  for(let r=0;r<Hh;r++){for(let c=0;c<W;c++) g[c]=f[r*W+c];dt(W);for(let c=0;c<W;c++) f[r*W+c]=d[c];}
+  const out=new Float32Array(W*Hh);for(let k=0;k<W*Hh;k++) out[k]=Math.sqrt(f[k]);return out;
+}
 /*GEN2*/
-/* ---------- worker: fills one tile (N cells + a 1-cell skirt all round, north row first) ---------- */
+/* ---------- worker: tiles (N cells + a skirt all round, north row first), coarse bands for the hydrology, the hydrology itself ---------- */
 const WORKER_SRC=SRC.slice(SRC.indexOf("/*GEN1*/"),SRC.indexOf("/*GEN2*/"))+`
-onmessage=e=>{const {id,z,i,j,N,seed,T0}=e.data,T=T0/Math.pow(2,z),s=T/N,M=N+2,E=new Float32Array(M*M);
-  for(let r=0;r<M;r++){const Y=(j+1)*T-(r-.5)*s;for(let c=0;c<M;c++){E[r*M+c]=heightAt(i*T+(c-.5)*s,Y,seed);}}
-  postMessage({id,buf:E.buffer},[E.buffer]);};`;
+onmessage=e=>{const m=e.data;
+  if(m.kind==="tile"){const {id,z,i,j,N,SK,seed,T0}=m,T=T0/Math.pow(2,z),s=T/N,M=N+2*SK,E=new Float32Array(M*M);
+    for(let r=0;r<M;r++){const Y=(j+1)*T-(r-SK+.5)*s;for(let c=0;c<M;c++){E[r*M+c]=heightAt(i*T+(c-SK+.5)*s,Y,seed);}}
+    postMessage({kind:"tile",id,buf:E.buffer},[E.buffer]);}
+  else if(m.kind==="band"){const {r0,r1,n,C,X0,Y0,seed}=m,out=new Float32Array((r1-r0)*n);
+    for(let r=r0;r<r1;r++){const Y=Y0-(r+.5)*C;for(let c=0;c<n;c++) out[(r-r0)*n+c]=heightAt(X0+(c+.5)*C,Y,seed);}
+    postMessage({kind:"band",r0,seed,buf:out.buffer},[out.buffer]);}
+  else if(m.kind==="hydro"){const {n,C,X0,Y0,seed}=m,H=new Float32Array(m.buf),t0=Date.now(),h=hydro(H,n,C,X0,Y0);
+    postMessage({kind:"hydro",seed,n,C,X0,Y0,ms:Date.now()-t0,lake:h.lake.buffer,pts:h.pts.buffer,rivers:h.rivers,lands:h.lands,lakes:h.lakes,peaks:h.peaks},[h.lake.buffer,h.pts.buffer]);}
+};`;
 
 /* ---------- settings and view ---------- */
-const S={seed:7,finest:10,shade:1,N:256,T0:8388608,litR:2200e3,baseLevel:6};
+const S={seed:7,finest:10,shade:1,N:256,SK:24,T0:8388608,litR:2200e3,baseLevel:6,hydroC:4000,hydroR:1.2};
 const HOLY=[{n:"極",x:0,y:0,pole:true},{n:"聖地A",x:-520e3,y:340e3},{n:"聖地B",x:610e3,y:-180e3},{n:"聖地C",x:120e3,y:-700e3}];
-const layers={lContour:true,lIso:true,lLit:true,lHoly:true};
+const layers={lContour:true,lIso:true,lWave:true,lRiver:true,lLabel:true,lLit:true,lHoly:true};
 const view={mode:"plane",x:0,y:0,zoom:1.2,lu:0,lv:0,lz:0};   // plane: centre (m) + zoom (m/px = 32768/2^zoom); log chart: centre (rad, ln r/R0) + zoom
 const $=id=>document.getElementById(id);
 const box=$("box"),mapC=$("map"),hud=$("hud"),dbg=$("dbg");
@@ -114,17 +195,20 @@ const ISO=[-200,-1000,-2000,-3000,-4000,-5000,-6000];
 
 /* ---------- tile store: generated on demand by a worker pool, kept in an LRU ---------- */
 const store=new Map(),queue=[];let tick=0,inflight=0;
-const pool=[];
+const pool=[];let hydroW=null;
 function makeWorkers(){
   const n=Math.max(1,Math.min(8,(navigator.hardwareConcurrency||4)-1)),url=URL.createObjectURL(new Blob([WORKER_SRC],{type:"text/javascript"}));
-  for(let k=0;k<n;k++){const w=new Worker(url);w.busy=false;w.onmessage=e=>{const rec=store.get(e.data.id);w.busy=false;inflight--;
-    if(rec&&rec.seed===S.seed){rec.E=new Float32Array(e.data.buf);rec.pending=false;rec.img=null;schedule();}
-    pump();};pool.push(w);}
+  for(let k=0;k<n;k++){const w=new Worker(url);w.busy=false;w.onmessage=e=>{const m=e.data;
+    if(m.kind==="tile"){const rec=store.get(m.id);w.busy=false;inflight--;if(rec&&rec.seed===S.seed){rec.E=new Float32Array(m.buf);rec.pending=false;rec.img=null;schedule();}pump();}
+    else if(m.kind==="band"){w.busy=false;bandDone(m);pump();}};pool.push(w);}
+  hydroW=new Worker(url);hydroW.onmessage=e=>hydroDone(e.data);
 }
 function pump(){
   queue.sort((a,b)=>b.pri-a.pri);
-  for(const w of pool){if(w.busy) continue;let rec;while(queue.length){const q=queue.pop();if(q.seed===S.seed&&!q.E&&q.pending){rec=q;break;}}
-    if(!rec) return;w.busy=true;inflight++;w.postMessage({id:rec.key,z:rec.z,i:rec.i,j:rec.j,N:S.N,seed:S.seed,T0:S.T0});}
+  for(const w of pool){if(w.busy) continue;
+    if(hydroBands.length){const b=hydroBands.pop();w.busy=true;w.postMessage(Object.assign({kind:"band"},b));continue;}
+    let rec;while(queue.length){const q=queue.pop();if(q.seed===S.seed&&!q.E&&q.pending){rec=q;break;}}
+    if(!rec) return;w.busy=true;inflight++;w.postMessage({kind:"tile",id:rec.key,z:rec.z,i:rec.i,j:rec.j,N:S.N,SK:S.SK,seed:S.seed,T0:S.T0});}
 }
 function tileGet(z,i,j,pri){
   const key=z+"/"+i+"/"+j;let rec=store.get(key);
@@ -134,20 +218,65 @@ function tileGet(z,i,j,pri){
   return rec;
 }
 function trimStore(){
-  if(store.size<=420) return;
+  if(store.size<=300) return;
   const recs=[...store.values()].filter(r=>!r.pending||r.E).sort((a,b)=>a.last-b.last);
-  for(let k=0;k<recs.length-320;k++) store.delete(recs[k].key);lastTile.E=null;
+  for(let k=0;k<recs.length-220;k++) store.delete(recs[k].key);lastTile.E=null;
 }
 
-/* ---------- painting a height grid: tints, Swiss-style shading, then contours ---------- */
+/* ---------- hydrology: a coarse grid of the lit world, made in bands by the pool, analysed by one worker ---------- */
+let hydroBands=[],hydroGrid=null,hydroState="idle",HY=null;   // HY: {n,C,X0,Y0,lake,pts,rivers,lands,lakes,peaks,names}
+function hydroStart(){
+  const R=S.litR*S.hydroR,C=S.hydroC,n=Math.ceil(2*R/C);hydroGrid={n,C,X0:-R,Y0:R,H:new Float32Array(n*n),left:0,seed:S.seed};
+  const bands=Math.max(4,pool.length*2),per=Math.ceil(n/bands);hydroBands=[];
+  for(let b=0;b<bands;b++){const r0=b*per,r1=Math.min(n,r0+per);if(r0<r1){hydroBands.push({r0,r1,n,C,X0:-R,Y0:R,seed:S.seed});hydroGrid.left++;}}
+  hydroBands.reverse();hydroState="bands";HY=null;pump();
+}
+function bandDone(m){
+  if(!hydroGrid||m.seed!==hydroGrid.seed) return;const g=hydroGrid;g.H.set(new Float32Array(m.buf),m.r0*g.n);
+  if(--g.left===0){hydroState="analysing";const H=g.H;hydroGrid=null;hydroW.postMessage({kind:"hydro",n:g.n,C:g.C,X0:g.X0,Y0:g.Y0,seed:g.seed,buf:H.buffer},[H.buffer]);}
+}
+function hydroDone(m){
+  if(m.seed!==S.seed) return;
+  HY={n:m.n,C:m.C,X0:m.X0,Y0:m.Y0,lake:new Float32Array(m.lake),pts:new Float32Array(m.pts),rivers:m.rivers,lands:m.lands,lakes:m.lakes,peaks:m.peaks,ms:m.ms};
+  for(const rv of HY.rivers){let x0=1e18,y0=1e18,x1=-1e18,y1=-1e18;for(let p=rv.st;p<rv.en;p+=3){const x=HY.pts[p],y=HY.pts[p+1];if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}rv.bb=[x0,y0,x1,y1];}
+  nameFeatures();hydroState="ready";for(const r of store.values()) r.img=null;schedule();
+}
+function lakeLevelAt(X,Y){   // water level of the lake covering this point, or NaN
+  if(!HY) return NaN;const c=(X-HY.X0)/HY.C-.5,r=(HY.Y0-Y)/HY.C-.5;if(c<0||r<0||c>=HY.n-1||r>=HY.n-1) return NaN;
+  const c0=Math.floor(c),r0=Math.floor(r),k=r0*HY.n+c0,L=HY.lake;
+  // bilinear where all four corners are lake; at the shore the highest nearby level, so the water follows the fine ground instead of the coarse cells
+  const a=L[k],b=L[k+1],d=L[k+HY.n],e=L[k+HY.n+1];
+  if(a===a&&b===b&&d===d&&e===e){const fx=c-c0,fy=r-r0;return (a*(1-fx)+b*fx)*(1-fy)+(d*(1-fx)+e*fx)*fy;}
+  let mx=NaN;for(const v of [a,b,d,e]) if(v===v&&!(v<=mx)) mx=v;return mx;
+}
+
+/* ---------- placeholder names until the world generator supplies real ones ---------- */
+const SYL={c:["b","d","g","h","k","l","m","n","r","s","t","v","w","sk","st","br","kr","th","fr","gr"],v:["a","e","i","o","u","ei","au","ie","y"],
+  land:["holm","ey","land","mark","vik","heim","nes","gard"],lake:["see","vatn","meer"],river:["a","ach","elv","strom","beck"],peak:["berg","fjell","horn","tind"]};
+function nameFor(kind,id){const h=ih(id*7+1,kind.length,S.seed+99),pick=(arr,k)=>arr[(h>>>k)%arr.length];
+  let s=pick(SYL.c,0)+pick(SYL.v,5)+pick(SYL.c,10)+(h&1?pick(SYL.v,15):"");
+  if(kind==="river") s=pick(SYL.c,0)+pick(SYL.v,5)+pick(SYL.c,10)+pick(SYL.river,20);
+  else s+=pick(SYL[kind],20);
+  return s[0].toUpperCase()+s.slice(1);}
+function nameFeatures(){
+  HY.lands.sort((a,b)=>b.area-a.area);HY.lands.forEach((l,i)=>{l.name=nameFor("land",i);});
+  HY.lakes.sort((a,b)=>b.area-a.area);HY.lakes.forEach((l,i)=>{l.name=nameFor("lake",i);});
+  HY.rivers.sort((a,b)=>b.mx-a.mx);HY.rivers.forEach((r,i)=>{r.name=nameFor("river",i);r.id=i;});
+  HY.peaks.forEach((p,i)=>{p.name=nameFor("peak",i);});
+}
+
+/* ---------- painting a height grid: tints, Swiss-style shading, then water lines, rivers and contours ---------- */
 function landCol(e){const t=clamp(e/3200,0,1);return [233-40*t-10*t*t,221-50*t,191-62*t];}
 function seaCol(e){const d=-e;if(d<200){const t=d/200;return [214-8*t,222-6*t,206-2*t];}const t=clamp((d-200)/5800,0,1);return [196-80*t,212-72*t,204-60*t];}
-// E has a 1-cell skirt; spacing(r,c) gives metres per cell; writes the (M-2)x(M-2) core into img
-function shadeInto(img,E,M,spacing){
-  const d=img.data,W=M-2,str=S.shade;
-  for(let r=1;r<M-1;r++)for(let c=1;c<M-1;c++){
-    const k=r*M+c,e=E[k];const o=((r-1)*W+(c-1))*4;
+const LAKE=[178,198,196];
+// E is M wide and N2 tall with a skirt of SK; spacing(r,c) gives metres per cell; lakeAt(r,c) gives the lake level or NaN; writes the core into img
+function shadeInto(img,E,M,N2,SK,spacing,lakeAt){
+  const d=img.data,W=M-2*SK,str=S.shade;
+  for(let r=SK;r<N2-SK;r++)for(let c=SK;c<M-SK;c++){
+    const k=r*M+c,e=E[k];const o=((r-SK)*W+(c-SK))*4;
     if(!(e===e)){d[o]=239;d[o+1]=229;d[o+2]=207;d[o+3]=255;continue;}
+    const lk=lakeAt?lakeAt(r,c):NaN;
+    if(lk===lk&&lk>e){const t=clamp((lk-e)/60,0,1);d[o]=LAKE[0]-10*t;d[o+1]=LAKE[1]-8*t;d[o+2]=LAKE[2]-4*t;d[o+3]=255;continue;}
     const sp=spacing(r,c),col=e>=0?landCol(e):seaCol(e);
     const gx=(E[k+1]-E[k-1])/(2*sp),gy=(E[k-M]-E[k+M])/(2*sp);            // east and north slopes
     const pxKm=sp/1000,zf=Math.max(1,Math.sqrt(.5/pxKm));                 // close up the real slopes are steep: tone the shading down
@@ -172,21 +301,47 @@ function isoSegs(E,M,N2,t,seg){
         case 6:case 9:seg(Tx,r,Bx,r+1);break; case 7:case 8:seg(c,Lz,Tx,r);break;
         case 5:seg(c,Lz,Tx,r);seg(Bx,r+1,c+1,Rz);break; case 10:seg(Tx,r,c+1,Rz);seg(c,Lz,Bx,r+1);break;}}}
 }
-// draws coast, isobaths and contours of grid E (M wide, N2 tall) onto ctx; toX/toY map grid coordinates to the ctx
-function drawLines(ctx,E,M,N2,landStep,toX,toY,lw){
-  const iso=(t,color,w)=>{ctx.strokeStyle=color;ctx.lineWidth=w*lw;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
-    isoSegs(E,M,N2,t,(x1,y1,x2,y2)=>{ctx.moveTo(toX(x1+.5),toY(y1+.5));ctx.lineTo(toX(x2+.5),toY(y2+.5));});ctx.stroke();};
+const WAVE=[2.4,3.3,4.4,5.8,7.6,9.9,12.8,16.5];   // water lines: spacing grows by about a quarter each line
+// draws water lines, coast, isobaths, contours and lake shores of grid E onto ctx; toX/toY map grid coordinates to the ctx
+function drawLines(ctx,E,M,N2,landStep,toX,toY,lw,LK,waves){
+  const iso=(A,t,color,w)=>{ctx.strokeStyle=color;ctx.lineWidth=w*lw;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
+    isoSegs(A,M,N2,t,(x1,y1,x2,y2)=>{ctx.moveTo(toX(x1+.5),toY(y1+.5));ctx.lineTo(toX(x2+.5),toY(y2+.5));});ctx.stroke();};
+  if(layers.lWave&&waves){const D=edt(E,M,N2,k=>E[k]>=0||(LK&&LK[k]>E[k]));
+    WAVE.forEach((w,i)=>iso(D,w*waves,"rgba(63,107,122,"+(.5-.055*i).toFixed(3)+")",.7));}
   let mx=-1e9;for(let k=0;k<E.length;k++) if(E[k]>mx) mx=E[k];
-  if(layers.lIso) for(const z of ISO) iso(z,"rgba(63,95,108,.5)",.8);
-  if(layers.lContour) for(let z=landStep;z<=mx;z+=landStep) iso(z,z%(landStep*5)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(landStep*5)===0?1:.7);
-  iso(0,"rgba(239,229,207,.7)",3.2);     // paper halo along the shore, like an engraved chart
-  iso(0,"#3d2b1c",1.4);
+  if(layers.lIso) for(const z of ISO) iso(E,z,"rgba(63,95,108,.5)",.8);
+  if(layers.lContour) for(let z=landStep;z<=mx;z+=landStep) iso(E,z,z%(landStep*5)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(landStep*5)===0?1:.7);
+  iso(E,0,"rgba(239,229,207,.7)",3.2);     // paper halo along the shore, like an engraved chart
+  iso(E,0,"#3d2b1c",1.4);
+  if(LK){const LD=new Float32Array(E.length);for(let k=0;k<E.length;k++) LD[k]=LK[k]===LK[k]?LK[k]-E[k]:-1;iso(LD,0,"rgba(61,43,28,.8)",1);}
+}
+// rivers as smoothed, tapered strokes; toS maps world metres to ctx pixels, pxPerM scales the width
+function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff){
+  if(!HY||!layers.lRiver) return;const P=HY.pts;ctx.strokeStyle="#3f6b7a";ctx.lineCap="round";ctx.lineJoin="round";
+  const wOf=a=>clamp(clamp(.4+.9*Math.log10(1+a/40),.5,2.6)*Math.pow(1.3,Math.max(0,zEff-5)),.5,10);
+  const minAcc=40*Math.pow(2,Math.max(0,5-zEff));
+  for(const rv of HY.rivers){const bb=rv.bb;if(rv.mx<minAcc||bb[2]<x0||bb[0]>x1||bb[3]<y0||bb[1]>y1) continue;
+    let prev=null,prevW=0;const pts=[];
+    for(let p=rv.st,k=0;p<rv.en;p+=3,k++){let x=P[p],y=P[p+1];
+      if(k>0&&p+3<rv.en){const dx=P[p+3]-P[p-3],dy=P[p+4]-P[p-2],l=Math.hypot(dx,dy)||1,j=(rnd(k,rv.id,S.seed)-.5)*.5*HY.C;x+=-dy/l*j;y+=dx/l*j;}   // a little deterministic meander hides the coarse grid
+      pts.push([x,y,P[p+2]]);}
+    for(let k=0;k<pts.length;k++){const q=pts[k],[sx,sy]=toS(q[0],q[1]),w=wOf(q[2]);
+      if(prev&&Math.abs(sx-prev[0])+Math.abs(sy-prev[1])>2500){prev=[sx,sy,sx,sy];prevW=w;continue;}   // a stream crossing the seam of the chart
+      if(prev){const mxp=(prev[0]+sx)/2,myp=(prev[1]+sy)/2;ctx.lineWidth=(prevW+w)/2;ctx.beginPath();
+        if(k>=2){const pp=prev;ctx.moveTo(pp[2],pp[3]);ctx.quadraticCurveTo(pp[0],pp[1],mxp,myp);}else{ctx.moveTo(prev[0],prev[1]);ctx.lineTo(mxp,myp);}
+        ctx.stroke();prev=[sx,sy,mxp,myp];}
+      else prev=[sx,sy,sx,sy];prevW=w;}
+    if(prev){ctx.lineWidth=prevW;ctx.beginPath();ctx.moveTo(prev[2],prev[3]);ctx.lineTo(prev[0],prev[1]);ctx.stroke();}}
 }
 function paintTile(rec){
-  const N=S.N,M=N+2,sp=tileSize(rec.z)/N,cv=document.createElement("canvas");cv.width=cv.height=N;
+  const N=S.N,SK=S.SK,M=N+2*SK,T=tileSize(rec.z),sp=T/N,cv=document.createElement("canvas");cv.width=cv.height=N;
   const c=cv.getContext("2d"),img=c.createImageData(N,N);
-  shadeInto(img,rec.E,M,()=>sp);c.putImageData(img,0,0);
-  drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-1,y=>y-1,1);
+  let LK=null;
+  if(HY&&layers.lRiver){LK=new Float32Array(M*M);for(let r=0;r<M;r++){const Y=(rec.j+1)*T-(r-SK+.5)*sp;for(let cc=0;cc<M;cc++) LK[r*M+cc]=lakeLevelAt(rec.i*T+(cc-SK+.5)*sp,Y);}}
+  shadeInto(img,rec.E,M,M,SK,()=>sp,LK?(r,cc)=>LK[r*M+cc]:null);c.putImageData(img,0,0);
+  const toS=(X,Y)=>[(X-rec.i*T)/sp,((rec.j+1)*T-Y)/sp];
+  drawRivers(c,rec.i*T-T*.05,rec.j*T-T*.05,(rec.i+1)*T+T*.05,(rec.j+1)*T+T*.05,toS,1/sp,rec.z);
+  drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-SK,y=>y-SK,1,LK,1);
   return cv;
 }
 
@@ -221,26 +376,29 @@ function sampleHeight(X,Y,mLocal){
     if(!E){for(let k=1;k<=4&&z-k>=0;k++){const f=1<<k,a=store.get((z-k)+"/"+Math.floor(i/f)+"/"+Math.floor(j/f));if(a&&a.E){E=a.E;zz=z-k;ii=Math.floor(i/f);jj=Math.floor(j/f);TT=tileSize(zz);break;}}}
     if(!E) return NaN;
     lastTile.z=z;lastTile.i=i;lastTile.j=j;lastTile.E=E;lastTile.zz=zz;lastTile.ii=ii;lastTile.jj=jj;lastTile.TT=TT;}
-  const N=S.N,M=N+2,s=TT/N,gx=(X-ii*TT)/s+.5,gy=((jj+1)*TT-Y)/s+.5;   // skirt cell 0 is centred half a cell outside the tile
+  const N=S.N,SK=S.SK,M=N+2*SK,s=TT/N,gx=(X-ii*TT)/s+SK-.5,gy=((jj+1)*TT-Y)/s+SK-.5;
   const x0=clamp(Math.floor(gx),0,M-2),y0=clamp(Math.floor(gy),0,M-2),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),k=y0*M+x0;
   return (E[k]*(1-fx)+E[k+1]*fx)*(1-fy)+(E[k+M]*(1-fx)+E[k+M+1]*fx)*fy;
 }
 const projC=document.createElement("canvas");
-function drawProjected(ctx,W,H,inv){
-  // inv(sx,sy) -> [X,Y,metresPerPixel] or null outside the chart; computed on a half-resolution grid with a skirt
-  const Q=2,Wg=Math.ceil(W/Q)+2,Hg=Math.ceil(H/Q)+2,M=Wg,E=new Float32Array(Wg*Hg),SPc=new Float32Array(Wg*Hg);
+function drawProjected(ctx,W,H,inv,fwd){
+  // inv(sx,sy) -> [X,Y,metresPerPixel] or null outside the chart; computed on a half-resolution grid with a 1-cell skirt
+  const Q=2,Wg=Math.ceil(W/Q)+2,Hg=Math.ceil(H/Q)+2,M=Wg,E=new Float32Array(Wg*Hg),SPc=new Float32Array(Wg*Hg),LK=HY&&layers.lRiver?new Float32Array(Wg*Hg):null;
   let missing=0;
   for(let r=0;r<Hg;r++)for(let c=0;c<Wg;c++){const p=inv((c-.5)*Q,(r-.5)*Q),k=r*Wg+c;
-    if(!p){E[k]=NaN;SPc[k]=1;continue;}
-    const h=sampleHeight(p[0],p[1],p[2]*Q);E[k]=h;SPc[k]=p[2]*Q;if(!(h===h)) missing++;}
+    if(!p){E[k]=NaN;SPc[k]=1;if(LK) LK[k]=NaN;continue;}
+    const h=sampleHeight(p[0],p[1],p[2]*Q);E[k]=h;SPc[k]=p[2]*Q;if(LK) LK[k]=lakeLevelAt(p[0],p[1]);if(!(h===h)) missing++;}
   projC.width=Wg-2;projC.height=Hg-2;const pc=projC.getContext("2d"),img=pc.createImageData(Wg-2,Hg-2);
-  shadeInto(img,E,M,(r,c)=>SPc[r*Wg+c]);pc.putImageData(img,0,0);
+  shadeInto(img,E,M,Hg,1,(r,c)=>SPc[r*Wg+c],LK?(r,c)=>LK[r*Wg+c]:null);pc.putImageData(img,0,0);
   ctx.imageSmoothingEnabled=true;ctx.drawImage(projC,0,0,W,H);
   // contours on the screen at full resolution; the step follows the finest level actually in view
   const mLoc=[];for(let r=0;r<Hg;r+=8)for(let c=0;c<Wg;c+=8){const p=inv((c-.5)*Q,(r-.5)*Q);if(p) mLoc.push(p[2]);}
   mLoc.sort((a,b)=>a-b);const mm=mLoc.length?mLoc[Math.floor(mLoc.length*.3)]:1e4;
   const zEff=clamp(Math.round(Math.log2(32768/mm)),0,S.finest);
-  drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1);
+  if(HY){const c0=inv(0,0),c1=inv(W,H),c2=inv(0,H),c3=inv(W,0),xs=[c0,c1,c2,c3].filter(Boolean);
+    const big=xs.length<4||view.mode==="disc";const x0=big?-1e9:Math.min(...xs.map(p=>p[0])),x1=big?1e9:Math.max(...xs.map(p=>p[0])),y0=big?-1e9:Math.min(...xs.map(p=>p[1])),y1=big?1e9:Math.max(...xs.map(p=>p[1]));
+    drawRivers(ctx,x0,y0,x1,y1,(X,Y)=>fwd(X,Y)||[-1e4,-1e4],1/mm,zEff);}
+  drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1,LK,null);
   return {z:zEff,shown:0,missing};
 }
 function discParams(W,H){return {cx:W/2,cy:H/2,Rm:Math.min(W,H)/2-26,R0:S.litR};}
@@ -271,33 +429,71 @@ function drawOverlay(ctx,W,H){
     ctx.fillStyle="#efe5cf";ctx.strokeStyle=h.pole?"#a4472b":"#3d2b1c";ctx.lineWidth=1.6;ctx.beginPath();
     if(h.pole){ctx.arc(p[0],p[1],6,0,6.2832);ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(p[0],p[1],2,0,6.2832);ctx.fillStyle="#a4472b";ctx.fill();}
     else{for(let k=0;k<8;k++){const a=k*Math.PI/4,rr=k%2?3:8;ctx.lineTo(p[0]+rr*Math.sin(a),p[1]-rr*Math.cos(a));}ctx.closePath();ctx.fill();ctx.stroke();}
-    const tw=ctx.measureText(h.n).width;ctx.fillStyle="rgba(239,229,207,.85)";ctx.fillRect(p[0]+9,p[1]-9,tw+6,16);ctx.fillStyle=h.pole?"#a4472b":"#3d2b1c";ctx.fillText(h.n,p[0]+12,p[1]+3);}}
+    const tw=ctx.measureText(h.n).width;ctx.fillStyle="rgba(239,229,207,.85)";ctx.fillRect(p[0]+9,p[1]-9,tw+6,16);ctx.fillStyle=h.pole?"#a4472b":"#3d2b1c";ctx.fillText(h.n,p[0]+12,p[1]+3);
+    labelBoxes.push([p[0]-9,p[1]-9,p[0]+15+tw,p[1]+9]);}}
   if(view.mode==="plane"){const m=mpp();let km=Math.pow(10,Math.floor(Math.log10(m*W*.25/1000)));if(km*2.5*1000/m<W*.25) km*=2.5;else if(km*2*1000/m<W*.25) km*=2;
     const L=km*1000/m,x0=14,y0=H-18;ctx.strokeStyle="#3d2b1c";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x0+L,y0);ctx.moveTo(x0,y0-5);ctx.lineTo(x0,y0+3);ctx.moveTo(x0+L,y0-5);ctx.lineTo(x0+L,y0+3);ctx.stroke();
     ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.fillText(km>=1?km+" km":Math.round(km*1000)+" m",x0+L+10,y0+4);}
   if(view.mode==="log"){ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.strokeStyle="rgba(61,43,28,.35)";ctx.lineWidth=1;const ppr=logPPR(W);
     for(let d=0;d<360;d+=30){const th=d*Math.PI/180;let x=W/2+(((th-view.lu+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI)*ppr;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();ctx.fillText("θ "+d+"°",x+4,14);}
     for(const rk of [100,250,500,1000,2200,5000,10000,25000,50000]){const p=logFwd(W,H,rk*1e3,0);if(!p||p[1]<0||p[1]>H) continue;ctx.beginPath();ctx.moveTo(0,p[1]);ctx.lineTo(W,p[1]);ctx.stroke();ctx.fillText("r "+rk.toLocaleString()+" km",6,p[1]-4);}}
-  if(view.mode==="disc"){const {cx,cy,Rm}=discParams(W,H),re=Rm*DISC_RMAX/(DISC_RMAX+1),g=ctx.createRadialGradient(cx,cy,re*.9,cx,cy,re);
+  if(view.mode==="disc"){const {cx,cy,Rm}=discParams(W,H),re=Rm*DISC_RMAX/(DISC_RMAX+1),g=ctx.createRadialGradient(cx,cy,re*.78,cx,cy,re*.97);
     g.addColorStop(0,"rgba(239,229,207,0)");g.addColorStop(1,"rgba(239,229,207,1)");ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,Rm,0,6.2832);ctx.fill();
     ctx.fillStyle="#6b5440";ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--body");ctx.textAlign="center";ctx.fillText("縁が無限遠。照らす円は内側の半分",cx,cy+Rm+18);ctx.textAlign="start";}
   ctx.restore();
 }
 
+/* ---------- names: placed on the screen each frame in priority order, never overlapping ---------- */
+let labelBoxes=[];
+function boxFree(b){for(const o of labelBoxes) if(b[0]<o[2]&&b[2]>o[0]&&b[1]<o[3]&&b[3]>o[1]) return false;return true;}
+function localScale(W,H,X,Y){   // metres per pixel at this point of the current view
+  if(view.mode==="plane") return mpp();const q=toScreen(W,H,X,Y);if(!q) return Infinity;const p=(view.mode==="disc"?discInv(W,H):logInv(W,H))(q[0],q[1]);return p?p[2]:Infinity;
+}
+function drawLabels(ctx,W,H){
+  if(!HY||!layers.lLabel) return;const name=getComputedStyle(document.body).getPropertyValue("--name");ctx.save();ctx.textAlign="center";ctx.textBaseline="middle";
+  const put=(txt,x,y,ang,fs,style,fill,spacing,halo)=>{ctx.font=style+" "+fs.toFixed(1)+"px "+name;if("letterSpacing" in ctx) ctx.letterSpacing=spacing+"px";
+    const tw=ctx.measureText(txt).width+(("letterSpacing" in ctx)?0:spacing*txt.length),fh=fs*1.1;
+    const cs=Math.abs(Math.cos(ang)),sn=Math.abs(Math.sin(ang)),bw=tw*cs+fh*sn,bh=tw*sn+fh*cs,b=[x-bw/2-3,y-bh/2-2,x+bw/2+3,y+bh/2+2];
+    if(b[0]<0||b[2]>W||b[1]<0||b[3]>H||!boxFree(b)) return false;labelBoxes.push(b);
+    ctx.save();ctx.translate(x,y);ctx.rotate(ang);if(halo){ctx.lineWidth=3;ctx.strokeStyle="rgba(239,229,207,.85)";ctx.lineJoin="round";ctx.strokeText(txt,0,0);}ctx.fillStyle=fill;ctx.fillText(txt,0,0);ctx.restore();return true;};
+  // land masses: letter-spaced serif, size by the area on screen
+  for(const l of HY.lands){if(l.area<200e6) break;const p=toScreen(W,H,l.x,l.y);if(!p) continue;const sc=localScale(W,H,l.x,l.y),apx=l.area/(sc*sc);
+    if(apx<2500||apx>W*H*12) continue;const fs=clamp(11+6*Math.log10(apx/2500),11,30);
+    put(l.name.toUpperCase(),p[0],p[1],0,fs,"500","#5a4330",fs*.22+fs*.1*Math.log10(Math.max(1,apx/2500)),true);}
+  // rivers: italic blue along the stream, at the on-screen stretch nearest the centre
+  const m0=localScale(W,H,view.x,view.y);
+  if(view.mode==="plane"&&mpp()<=1500){for(const rv of HY.rivers){const bb=rv.bb,m=mpp(),x0=view.x-W/2*m,x1=view.x+W/2*m,y0=view.y-H/2*m,y1=view.y+H/2*m;
+      if(bb[2]<x0||bb[0]>x1||bb[3]<y0||bb[1]>y1) continue;if(rv.mx<40*Math.pow(Math.max(1,m/150),1.2)) continue;
+      let best=-1,bd=1e18;for(let p=rv.st+9;p<rv.en-9;p+=3){const d=(HY.pts[p]-view.x)**2+(HY.pts[p+1]-view.y)**2;if(d<bd&&HY.pts[p]>x0&&HY.pts[p]<x1&&HY.pts[p+1]>y0&&HY.pts[p+1]<y1){bd=d;best=p;}}
+      if(best<0) continue;const a=toScreen(W,H,HY.pts[best-9],HY.pts[best-8]),b=toScreen(W,H,HY.pts[best+9],HY.pts[best+10]),c=toScreen(W,H,HY.pts[best],HY.pts[best+1]);
+      let ang=Math.atan2(b[1]-a[1],b[0]-a[0]);if(ang>Math.PI/2) ang-=Math.PI;if(ang<-Math.PI/2) ang+=Math.PI;
+      const fs=clamp(10+2.2*Math.log10(rv.mx),11,17);put(rv.name,c[0],c[1]-fs*.8,ang,fs,"italic 500","#3f6b7a",fs*.06,true);}}
+  // lakes
+  for(const l of HY.lakes){const p=toScreen(W,H,l.x,l.y);if(!p) continue;const sc=localScale(W,H,l.x,l.y),apx=l.area/(sc*sc);if(apx<2500) continue;
+    const fs=clamp(10+4*Math.log10(apx/2500),11,20);put(l.name,p[0],p[1],0,fs,"italic 500","#3f6b7a",fs*.1,true);}
+  // peaks: a small triangle and the height, close up only
+  if(view.mode==="plane"&&mpp()<=600){ctx.font="11px "+getComputedStyle(document.body).getPropertyValue("--mono");
+    for(const pk of HY.peaks){const p=toScreen(W,H,pk.x,pk.y);if(p[0]<0||p[0]>W||p[1]<0||p[1]>H) continue;
+      const txt=pk.name+" "+Math.round(pk.h)+" m",b=[p[0]-6,p[1]-16,p[0]+ctx.measureText(txt).width+8,p[1]+6];if(!boxFree(b)) continue;labelBoxes.push(b);
+      ctx.fillStyle="#3d2b1c";ctx.beginPath();ctx.moveTo(p[0],p[1]-5);ctx.lineTo(p[0]+4,p[1]+2);ctx.lineTo(p[0]-4,p[1]+2);ctx.closePath();ctx.fill();
+      ctx.textAlign="left";ctx.lineWidth=3;ctx.strokeStyle="rgba(239,229,207,.85)";ctx.strokeText(txt,p[0]+7,p[1]-5);ctx.fillText(txt,p[0]+7,p[1]-5);ctx.textAlign="center";}}
+  ctx.restore();
+}
+
 /* ---------- render loop ---------- */
-let needRender=false,renderTimer=0,stats={z:0,shown:0,missing:0,ms:0};
+let renderTimer=0,stats={z:0,shown:0,missing:0,ms:0};
 function schedule(){if(renderTimer) return;renderTimer=setTimeout(()=>{renderTimer=0;render();},40);}
 function render(){
   const dpr=Math.min(devicePixelRatio||1,2),W=box.clientWidth,H=box.clientHeight;
   if(mapC.width!==Math.round(W*dpr)||mapC.height!==Math.round(H*dpr)){mapC.width=Math.round(W*dpr);mapC.height=Math.round(H*dpr);}
   const ctx=mapC.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   ctx.fillStyle="#efe5cf";ctx.fillRect(0,0,W,H);
-  const t0=performance.now();
+  const t0=performance.now();labelBoxes=[];
   if(view.mode==="plane") stats=drawPlane(ctx,W,H);
-  else if(view.mode==="disc") stats=drawProjected(ctx,W,H,discInv(W,H));
-  else stats=drawProjected(ctx,W,H,logInv(W,H));
+  else if(view.mode==="disc") stats=drawProjected(ctx,W,H,discInv(W,H),(X,Y)=>discFwd(W,H,X,Y));
+  else stats=drawProjected(ctx,W,H,logInv(W,H),(X,Y)=>logFwd(W,H,X,Y));
   stats.ms=performance.now()-t0;
-  drawOverlay(ctx,W,H);trimStore();updateHud();
+  drawOverlay(ctx,W,H);drawLabels(ctx,W,H);trimStore();updateHud();
 }
 
 /* ---------- readout: where the cursor is, in every coordinate system of the design ---------- */
@@ -311,19 +507,20 @@ function fmtKm(v){return (v/1000).toFixed(v<1e6?1:0)+" km";}
 function updateHud(){
   const W=box.clientWidth,H=box.clientHeight;let s="";
   const modeName={plane:"平面",disc:"全体図（円盤）",log:"海図（対数極）"}[view.mode];
-  s+=modeName+(view.mode==="plane"?"  1 px = "+(mpp()>=1000?(mpp()/1000).toFixed(2)+" km":Math.round(mpp())+" m")+"  レベル "+stats.z:"")+"\n";
+  s+=modeName+(view.mode==="plane"?"  1 px = "+(mpp()>=1000?(mpp()/1000).toFixed(2)+" km":Math.round(mpp())+" m")+"  レベル "+stats.z:"")+(hydroState==="ready"?"":"  川と湖を計算中…")+"\n";
   const p=cursor&&invScreen(W,H,cursor[0],cursor[1]);
   if(p){const [X,Y]=p,r=Math.hypot(X,Y),th=(Math.atan2(X,Y)*180/Math.PI+360)%360,h=sampleHeight(X,Y,p[2]);
     s+="工学座標  X "+fmtKm(X)+"  Y "+fmtKm(Y)+"\n極座標    r "+fmtKm(r)+"  θ "+th.toFixed(1)+"°  "+(r<=S.litR?"照らされた世界":"辺境")+"\n";
     const A=HOLY[1],B=HOLY[2],dA=Math.hypot(X-A.x,Y-A.y),dB=Math.hypot(X-B.x,Y-B.y);
     const g=Math.acos(clamp(((A.x-X)*(B.x-X)+(A.y-Y)*(B.y-Y))/(dA*dB),-1,1))*180/Math.PI;
     s+="航海者の座標  明るさの比 k "+(dA/dB).toFixed(3)+"  見込み角 γ "+g.toFixed(2)+"°\n";
-    s+="標高 "+(h===h?Math.round(h)+" m":"（まだ）");}
+    const lk=lakeLevelAt(X,Y);s+="標高 "+(h===h?Math.round(h)+" m":"（まだ）")+(lk===lk&&lk>h?"  湖 水面 "+Math.round(lk)+" m":"");}
   else s+="カーソルを地図に";
   hud.textContent=s;
   if(!dbg.hidden){let busy=0;for(const w of pool) if(w.busy) busy++;
     dbg.textContent="[debug] F2で隠す\nview "+JSON.stringify({mode:view.mode,x:Math.round(view.x),y:Math.round(view.y),zoom:+view.zoom.toFixed(3),lu:+view.lu.toFixed(3),lv:+view.lv.toFixed(3),lz:+view.lz.toFixed(2)})+
-      "\ntiles cached "+store.size+"  queued "+queue.length+"  workers busy "+busy+"/"+pool.length+"\nshown "+stats.shown+"  waiting "+stats.missing+"  draw "+stats.ms.toFixed(1)+" ms  size "+W+"x"+H;}
+      "\ntiles cached "+store.size+"  queued "+queue.length+"  workers busy "+busy+"/"+pool.length+"\nshown "+stats.shown+"  waiting "+stats.missing+"  draw "+stats.ms.toFixed(1)+" ms  size "+W+"x"+H+
+      "\nhydro "+hydroState+(HY?"  grid "+HY.n+"²  rivers "+HY.rivers.length+"  lakes "+HY.lakes.length+"  lands "+HY.lands.length+"  "+HY.ms+" ms":"");}
 }
 
 /* ---------- interaction ---------- */
@@ -350,19 +547,26 @@ box.addEventListener("touchmove",ev=>{if(ev.touches.length===2&&pinch){const d=M
 box.addEventListener("touchend",()=>{pinch=null;});
 window.addEventListener("keydown",ev=>{if(ev.key==="F2"){ev.preventDefault();dbg.hidden=!dbg.hidden;updateHud();}
   if(ev.key==="+"||ev.key==="="){view.zoom=clamp(view.zoom+.5,-3,S.finest+1);schedule();}if(ev.key==="-"){view.zoom=clamp(view.zoom-.5,-3,S.finest+1);schedule();}});
-function setMode(m){view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"]]) $(id).classList.toggle("on",k===m);schedule();saveView();}
+// switching between the plane and the chart keeps the same place and scale on screen
+function syncModes(from,to){const W=box.clientWidth;
+  if(from==="plane"&&to==="log"){const r=Math.hypot(view.x,view.y);view.lu=Math.atan2(view.x,view.y);
+    if(r<.25*W*mpp()){view.lv=0;view.lz=0;}else{view.lv=Math.log(r/S.litR);view.lz=clamp(Math.log2(r/mpp()*2*Math.PI/W),-1,8);}}
+  if(from==="log"&&to==="plane"){const r=S.litR*Math.exp(view.lv);view.x=r*Math.sin(view.lu);view.y=r*Math.cos(view.lu);view.zoom=clamp(Math.log2(32768/(r/logPPR(W))),-3,S.finest+1);}
+}
+function setMode(m){syncModes(view.mode,m);view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"]]) $(id).classList.toggle("on",k===m);schedule();saveView();}
 $("mPlane").onclick=()=>setMode("plane");$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
 $("home").onclick=()=>{view.x=0;view.y=0;view.zoom=1.2;view.lu=0;view.lv=0;view.lz=0;schedule();saveView();};
-function resetTiles(){store.clear();queue.length=0;lastTile.E=null;schedule();}
+function resetTiles(){store.clear();queue.length=0;lastTile.E=null;hydroStart();schedule();}
 $("seed").onchange=()=>{S.seed=+$("seed").value|0;resetTiles();saveView();};
 $("reseed").onclick=()=>{$("seed").value=Math.floor(Math.random()*1e6);$("seed").onchange();};
 $("finest").onchange=()=>{S.finest=clamp(+$("finest").value|0,6,12);$("finest").value=S.finest;schedule();saveView();};
 $("shade").oninput=()=>{S.shade=+$("shade").value/100;for(const r of store.values()) r.img=null;schedule();};
 for(const k of Object.keys(layers)) $(k).onchange=()=>{layers[k]=$(k).checked;for(const r of store.values()) r.img=null;schedule();};
-function saveView(){try{localStorage.setItem("sf-flatmap-1",JSON.stringify({view,seed:S.seed,finest:S.finest}));}catch(e){}}
-(function load(){try{const s=JSON.parse(localStorage.getItem("sf-flatmap-1"));if(s){Object.assign(view,s.view);S.seed=s.seed;S.finest=s.finest;$("seed").value=S.seed;$("finest").value=S.finest;}}catch(e){}})();
+function saveView(){try{localStorage.setItem("sf-flatmap-2",JSON.stringify({view,seed:S.seed,finest:S.finest}));}catch(e){}}
+(function load(){try{const s=JSON.parse(localStorage.getItem("sf-flatmap-2"));if(s){Object.assign(view,s.view);S.seed=s.seed;S.finest=s.finest;$("seed").value=S.seed;$("finest").value=S.finest;}}catch(e){}})();
 new ResizeObserver(()=>schedule()).observe(box);
-makeWorkers();setMode(view.mode);
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>schedule());
+makeWorkers();hydroStart();setMode(view.mode);
 </script>
 </body>
 </html>
