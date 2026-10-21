@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>平面世界の地図 試作2</title>
+<title>平面世界の地図 試作4</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono&display=swap">
 <style>
@@ -29,38 +29,45 @@ input[type=range]{width:90px}
 #box{position:relative;flex:1;min-height:0;overflow:hidden;background:var(--paper);touch-action:none;cursor:grab}
 #box.drag{cursor:grabbing}
 #map{position:absolute;inset:0;width:100%;height:100%;display:block}
+#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+#gl[hidden]{display:none}
 #hud{position:absolute;left:10px;top:8px;font:12px/1.5 var(--mono);white-space:pre;background:rgba(239,229,207,.85);padding:5px 9px;border-radius:3px;pointer-events:none;border:1px solid rgba(61,43,28,.25)}
 #dbg{position:absolute;left:10px;bottom:34px;font:12px/1.5 var(--mono);white-space:pre;background:rgba(30,22,14,.82);color:#f3ead6;padding:6px 10px;border-radius:3px;pointer-events:none}
 #note{position:absolute;right:10px;bottom:8px;font-size:12px;color:var(--ink-2);background:rgba(239,229,207,.8);padding:2px 8px;border-radius:3px;pointer-events:none}
 .hint{font-size:12px;color:var(--ink-2)}
-@media (max-width:700px){header h1{width:100%} header .hint{display:none} #hud{font-size:11px}}
+#gear{display:none}
+@media (max-width:700px){header h1{width:auto;flex:1} header .hint{display:none} #hud{font-size:11px} #gear{display:inline-block} header .more{display:none} header.open .more{display:inline-flex} header.open .grp{width:100%} header .more[hidden]{display:none!important}}
 </style>
 </head>
 <body>
 <header>
-  <h1>平面世界の地図 試作2</h1>
+  <h1>平面世界の地図 試作4</h1>
+  <button id="gear" title="設定を開く">設定</button>
   <span class="grp">
     <button id="mPlane" class="on" title="工学座標そのまま。距離と方位がどこでも正確">平面</button>
     <button id="mLog" title="横が極の周りの向き、縦が極からの距離の対数。羅針盤一定の航路が直線になる海図">海図（対数極）</button>
     <button id="mDisc" title="無限の平面を一枚の円に。縁が無限遠">全体図（円盤）</button>
+    <button id="m3d" title="同じ区画を立体に。回転と俯角はこの表示だけ">立体</button>
   </span>
-  <label>seed <input type="number" id="seed" value="7"></label>
-  <button id="reseed">乱数</button>
-  <label>最細レベル <input type="number" id="finest" min="6" max="12" value="10" style="width:4em"></label>
-  <label>陰影 <input type="range" id="shade" min="0" max="200" value="100"></label>
-  <label><input type="checkbox" id="lContour" checked>等高線</label>
-  <label><input type="checkbox" id="lIso" checked>等深線</label>
-  <label><input type="checkbox" id="lWave" checked>水線</label>
-  <label><input type="checkbox" id="lRiver" checked>川と湖</label>
-  <label><input type="checkbox" id="lLabel" checked>地名</label>
-  <label><input type="checkbox" id="lLit" checked>照らす円</label>
-  <label><input type="checkbox" id="lHoly" checked>極と聖地</label>
-  <button id="home">中心へ</button>
-  <label class="btnlike" title="地形工房の「区画データを書き出す」で作った zip（中は world.sfw）">世界を読み込む<input type="file" id="worldFile" accept=".sfw,.zip" hidden></label>
-  <button id="worldOff" hidden>仮の世界に戻す</button>
-  <span class="hint">ドラッグで移動、ホイールで拡大、F2 でデバッグ表示</span>
+  <button id="northUp" hidden title="回転を戻して北を上に">北を上に</button>
+  <label class="more">seed <input type="number" id="seed" value="7"></label>
+  <button class="more" id="reseed">乱数</button>
+  <label class="more">最細レベル <input type="number" id="finest" min="6" max="12" value="10" style="width:4em"></label>
+  <label class="more">陰影 <input type="range" id="shade" min="0" max="200" value="100"></label>
+  <label class="more"><input type="checkbox" id="lContour" checked>等高線</label>
+  <label class="more"><input type="checkbox" id="lIso" checked>等深線</label>
+  <label class="more"><input type="checkbox" id="lWave" checked>水線</label>
+  <label class="more"><input type="checkbox" id="lRiver" checked>川と湖</label>
+  <label class="more"><input type="checkbox" id="lLabel" checked>地名</label>
+  <label class="more"><input type="checkbox" id="lLit" checked>照らす円</label>
+  <label class="more"><input type="checkbox" id="lHoly" checked>極と聖地</label>
+  <button class="more" id="home">中心へ</button>
+  <label class="btnlike more" title="地形工房の「区画データを書き出す」で作った zip（中は world.sfw）">世界を読み込む<input type="file" id="worldFile" accept=".sfw,.zip" hidden></label>
+  <button class="more" id="worldOff" hidden>仮の世界に戻す</button>
+  <span class="hint">ドラッグで移動、ホイールで拡大、立体では右ドラッグか Shift+ドラッグで回転と俯角（二本指でも）、F2 でデバッグ表示</span>
 </header>
 <div id="box">
+  <canvas id="gl" hidden></canvas>
   <canvas id="map"></canvas>
   <div id="hud"></div>
   <div id="dbg" hidden></div>
@@ -200,12 +207,12 @@ onmessage=e=>{const m=e.data;
 };`;
 
 /* ---------- settings and view ---------- */
-const S={seed:7,gen:0,finest:10,shade:1,N:256,SK:24,T0:8388608,litR:2200e3,baseLevel:6,hydroC:4000,hydroR:1.2};
+const S={seed:7,gen:0,finest:10,shade:1,mesh3d:64,N:256,SK:24,T0:8388608,litR:2200e3,baseLevel:6,hydroC:4000,hydroR:1.2};
 const HOLY=[{n:"極",x:0,y:0,pole:true},{n:"聖地A",x:-520e3,y:340e3},{n:"聖地B",x:610e3,y:-180e3},{n:"聖地C",x:120e3,y:-700e3}];
 const layers={lContour:true,lIso:true,lWave:true,lRiver:true,lLabel:true,lLit:true,lHoly:true};
-const view={mode:"plane",x:0,y:0,zoom:1.2,lu:0,lv:0,lz:0};   // plane: centre (m) + zoom (m/px = 32768/2^zoom); log chart: centre (rad, ln r/R0) + zoom
+const view={mode:"plane",x:0,y:0,zoom:1.2,lu:0,lv:0,lz:0,rot:0,pitch:0.95};   // rot: bearing of screen-up (rad, clockwise from north), pitch: 0 = straight down; both 3D only   // plane: centre (m) + zoom (m/px = 32768/2^zoom); log chart: centre (rad, ln r/R0) + zoom
 const $=id=>document.getElementById(id);
-const box=$("box"),mapC=$("map"),hud=$("hud"),dbg=$("dbg");
+const box=$("box"),mapC=$("map"),glC=$("gl"),hud=$("hud"),dbg=$("dbg");
 function tileSize(z){return S.T0/Math.pow(2,z);}
 function mpp(){return 32768/Math.pow(2,view.zoom);}
 function landStepFor(z){return z<=2?1000:z<=4?500:z<=6?250:z<=8?100:z<=10?50:20;}
@@ -238,7 +245,7 @@ function tileGet(z,i,j,pri){
 function trimStore(){
   if(store.size<=300) return;
   const recs=[...store.values()].filter(r=>!r.pending||r.E).sort((a,b)=>a.last-b.last);
-  for(let k=0;k<recs.length-220;k++) store.delete(recs[k].key);lastTile.E=null;
+  for(let k=0;k<recs.length-220;k++){freeGL(recs[k]);store.delete(recs[k].key);}lastTile.E=null;
 }
 
 /* ---------- hydrology: a coarse grid of the lit world, made in bands by the pool, analysed by one worker ---------- */
@@ -416,6 +423,11 @@ function sampleHeight(X,Y,mLocal){
     lastTile.z=z;lastTile.i=i;lastTile.j=j;lastTile.E=E;lastTile.zz=zz;lastTile.ii=ii;lastTile.jj=jj;lastTile.TT=TT;}
   return heightInTile(E,TT,ii,jj,X,Y);
 }
+function peekHeight(X,Y,mLocal){   // like sampleHeight, but only from tiles already made (never asks for one); 0 when none
+  const z=clamp(Math.round(Math.log2(32768/mLocal)),0,S.finest);
+  for(let zz=z;zz>=0;zz--){const T=tileSize(zz),a=store.get(zz+"/"+Math.floor(X/T)+"/"+Math.floor(Y/T));if(a&&a.E){const h=heightInTile(a.E,T,Math.floor(X/T),Math.floor(Y/T),X,Y);return h===h?h:0;}}
+  return 0;
+}
 const projC=document.createElement("canvas");
 function drawProjected(ctx,W,H,inv,fwd){
   // inv(sx,sy) -> [X,Y,metresPerPixel] or null outside the chart; computed on a half-resolution grid with a 1-cell skirt
@@ -451,6 +463,7 @@ function logFwd(W,H,X,Y){const ppr=logPPR(W),r=Math.hypot(X,Y);if(r<=0) return n
 /* ---------- overlays: the lit circle, the pole and the holy sites, the scale bar ---------- */
 function toScreen(W,H,X,Y){
   if(view.mode==="plane"){const m=mpp();return [W/2+(X-view.x)/m,H/2-(Y-view.y)/m];}
+  if(view.mode==="3d"){const c=cam3d(W,H);let h=peekHeight(X,Y,c.D/c.f);if(h<0) h=0;const q=c.project(X,Y,h*c.exag);return q&&q[2]*c.f<12*c.D?q:null;}   // nothing past the fog
   if(view.mode==="disc") return discFwd(W,H,X,Y);
   return logFwd(W,H,X,Y);
 }
@@ -458,6 +471,8 @@ function drawOverlay(ctx,W,H){
   ctx.save();ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--body");
   if(layers.lLit){ctx.strokeStyle="#3d2b1c";ctx.lineWidth=1.4;ctx.setLineDash([6,5]);ctx.beginPath();
     if(view.mode==="plane"){const m=mpp(),[ox,oy]=toScreen(W,H,0,0),R=S.litR/m;if(R<4e4) ctx.arc(ox,oy,R,0,6.2832);}
+    else if(view.mode==="3d"){const c=cam3d(W,H);let pen=false;for(let d=0;d<=360;d+=1){const a=d*Math.PI/180,p=c.project(S.litR*Math.sin(a),S.litR*Math.cos(a),0);
+      if(!p||Math.abs(p[0])>8*W||Math.abs(p[1])>8*H){pen=false;continue;}if(pen) ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);pen=true;}}
     else if(view.mode==="disc"){const {cx,cy,Rm}=discParams(W,H);ctx.arc(cx,cy,Rm/2,0,6.2832);ctx.moveTo(cx+Rm,cy);ctx.arc(cx,cy,Rm,0,6.2832);}
     else{const p=logFwd(W,H,S.litR,0);if(p){ctx.moveTo(0,p[1]);ctx.lineTo(W,p[1]);}}
     ctx.stroke();ctx.setLineDash([]);}
@@ -470,6 +485,10 @@ function drawOverlay(ctx,W,H){
   if(view.mode==="plane"){const m=mpp();let km=Math.pow(10,Math.floor(Math.log10(m*W*.25/1000)));if(km*2.5*1000/m<W*.25) km*=2.5;else if(km*2*1000/m<W*.25) km*=2;
     const L=km*1000/m,x0=14,y0=H-18;ctx.strokeStyle="#3d2b1c";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x0+L,y0);ctx.moveTo(x0,y0-5);ctx.lineTo(x0,y0+3);ctx.moveTo(x0+L,y0-5);ctx.lineTo(x0+L,y0+3);ctx.stroke();
     ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.fillText(km>=1?km+" km":Math.round(km*1000)+" m",x0+L+10,y0+4);}
+  if(view.mode==="3d"){const cx=W-34,cy=64,b=view.rot;ctx.save();ctx.translate(cx,cy);ctx.fillStyle="rgba(239,229,207,.8)";ctx.beginPath();ctx.arc(0,0,22,0,6.2832);ctx.fill();ctx.strokeStyle="#3d2b1c";ctx.lineWidth=1;ctx.stroke();
+    ctx.rotate(-b);ctx.fillStyle="#a4472b";ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(5,0);ctx.lineTo(-5,0);ctx.closePath();ctx.fill();ctx.fillStyle="#3d2b1c";ctx.beginPath();ctx.moveTo(0,17);ctx.lineTo(5,0);ctx.lineTo(-5,0);ctx.closePath();ctx.fill();
+    ctx.font="bold 10px "+getComputedStyle(document.body).getPropertyValue("--body");ctx.textAlign="center";ctx.fillStyle="#3d2b1c";ctx.fillText("極",0,-24);ctx.restore();
+    ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.textAlign="right";ctx.fillText("俯角 "+Math.round(view.pitch*180/Math.PI)+"°  高さ ×"+cam3d(W,H).exag.toFixed(1),W-10,106);ctx.textAlign="start";}
   if(view.mode==="log"){ctx.font="12px "+getComputedStyle(document.body).getPropertyValue("--mono");ctx.fillStyle="#3d2b1c";ctx.strokeStyle="rgba(61,43,28,.35)";ctx.lineWidth=1;const ppr=logPPR(W);
     for(let d=0;d<360;d+=30){const th=d*Math.PI/180;let x=W/2+(((th-view.lu+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI)*ppr;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();ctx.fillText("θ "+d+"°",x+4,14);}
     for(const rk of [100,250,500,1000,2200,5000,10000,25000,50000]){const p=logFwd(W,H,rk*1e3,0);if(!p||p[1]<0||p[1]>H) continue;ctx.beginPath();ctx.moveTo(0,p[1]);ctx.lineTo(W,p[1]);ctx.stroke();ctx.fillText("r "+rk.toLocaleString()+" km",6,p[1]-4);}}
@@ -479,11 +498,98 @@ function drawOverlay(ctx,W,H){
   ctx.restore();
 }
 
+/* ---------- 3D: the same tiles as meshes (64×64 a tile, flat sea, skirts against cracks), their pictures as textures, paper fog ---------- */
+let gl=null,glP=null,glIdx=null,glIdxN=0,glLoc={};
+function cam3d(W,H){
+  const fov=45*Math.PI/180,f=(H/2)/Math.tan(fov/2),m=mpp(),D=f*m,b=view.rot,p=view.pitch,sb=Math.sin(b),cb=Math.cos(b),sp=Math.sin(p),cp=Math.cos(p);
+  const fw=[sb*sp,cb*sp,-cp],up=[sb*cp,cb*cp,sp],rt=[cb,-sb,0],cam=[view.x-fw[0]*D,view.y-fw[1]*D,cp*D],near=D/200,exag=clamp(1+m/80,1,8);
+  const project=(X,Y,h)=>{const vx=X-cam[0],vy=Y-cam[1],vz=h-cam[2],zc=fw[0]*vx+fw[1]*vy+fw[2]*vz;if(zc<near) return null;
+    const xc=rt[0]*vx+rt[1]*vy,yc=up[0]*vx+up[1]*vy+up[2]*vz;return [W/2+f*xc/zc,H/2-f*yc/zc,zc/f];};
+  const ground=(sx,sy)=>{const dx=sx-W/2,dy=-(sy-H/2),d=[rt[0]*dx+up[0]*dy+fw[0]*f,rt[1]*dx+up[1]*dy+fw[1]*f,rt[2]*dx+up[2]*dy+fw[2]*f];
+    if(d[2]>=-1e-9) return null;const t=-cam[2]/d[2];const X=cam[0]+d[0]*t,Y=cam[1]+d[1]*t;const zc=fw[0]*(X-cam[0])+fw[1]*(Y-cam[1])+fw[2]*(0-cam[2]);return [X,Y,zc/f];};
+  return {f,D,m,fw,up,rt,cam,near,exag,project,ground,W,H};
+}
+function glInit(){
+  gl=glC.getContext("webgl",{antialias:true,alpha:false,preserveDrawingBuffer:false});if(!gl) return false;
+  const vs=`attribute vec3 aPos;uniform vec3 uOff;uniform mat4 uVP;uniform float uT,uEx;uniform vec4 uUV;varying vec2 vUV;varying float vD;
+    void main(){vec3 w=vec3(aPos.x+uOff.x,aPos.y+uOff.y,aPos.z*uEx+uOff.z);vUV=uUV.xy+vec2(aPos.x/uT,1.0-aPos.y/uT)*uUV.zw;vD=length(w);gl_Position=uVP*vec4(w,1.0);}`;
+  const fs=`precision mediump float;uniform sampler2D uTex;uniform float uFog;varying vec2 vUV;varying float vD;
+    void main(){vec4 c=texture2D(uTex,vUV);float g=vD/uFog;float fg=1.0-exp(-g*g);gl_FragColor=vec4(mix(c.rgb,vec3(0.937,0.898,0.812),fg),1.0);}`;
+  const mk=(t,src)=>{const sh=gl.createShader(t);gl.shaderSource(sh,src);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));return sh;};
+  glP=gl.createProgram();gl.attachShader(glP,mk(gl.VERTEX_SHADER,vs));gl.attachShader(glP,mk(gl.FRAGMENT_SHADER,fs));gl.linkProgram(glP);
+  for(const n of ["uOff","uVP","uT","uEx","uUV","uTex","uFog"]) glLoc[n]=gl.getUniformLocation(glP,n);glLoc.aPos=gl.getAttribLocation(glP,"aPos");
+  // one index buffer for every tile: G×G quads plus a skirt all round
+  const G=S.mesh3d,V=G+1,idx=[];const at=(r,c)=>r*V+c;
+  for(let r=0;r<G;r++)for(let c=0;c<G;c++){const a=at(r,c),b=at(r,c+1),d=at(r+1,c),e=at(r+1,c+1);idx.push(a,d,b,b,d,e);}
+  const sk=V*V;   // skirt vertices: 4 sides × V, in the order south row (r=0), north row (r=G), west col, east col
+  for(let c=0;c<G;c++){idx.push(at(0,c),at(0,c+1),sk+c,sk+c,at(0,c+1),sk+c+1);idx.push(at(G,c+1),at(G,c),sk+V+c+1,sk+V+c+1,at(G,c),sk+V+c);}
+  for(let r=0;r<G;r++){idx.push(at(r+1,0),at(r,0),sk+2*V+r+1,sk+2*V+r+1,at(r,0),sk+2*V+r);idx.push(at(r,G),at(r+1,G),sk+3*V+r,sk+3*V+r,at(r+1,G),sk+3*V+r+1);}
+  glIdx=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,glIdx);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array(idx),gl.STATIC_DRAW);glIdxN=idx.length;
+  gl.enable(gl.DEPTH_TEST);return true;
+}
+function freeGL(rec){if(!gl) return;if(rec.vbo){gl.deleteBuffer(rec.vbo);rec.vbo=null;}if(rec.tex){gl.deleteTexture(rec.tex);rec.tex=null;}rec.texSrc=null;rec.meshSrc=null;}
+function meshFor(rec,src){   // vertices of this tile from the heights of src (itself or an ancestor with heights): local metres, sea flattened, skirt dropped
+  const G=S.mesh3d,V=G+1,T=tileSize(rec.z),TS=tileSize(src.z),s=T/G,drop=T*.012,out=new Float32Array((V*V+4*V)*3);let o=0;
+  const hAt=(lx,ly)=>{let h=heightInTile(src.E,TS,src.i,src.j,rec.i*T+lx,rec.j*T+ly);if(!(h===h)) h=0;return h<0?0:h;};
+  for(let r=0;r<V;r++){const ly=r*s;for(let c=0;c<V;c++){const lx=c*s;out[o++]=lx;out[o++]=ly;out[o++]=hAt(lx,ly);}}
+  const put=(lx,ly)=>{out[o++]=lx;out[o++]=ly;out[o++]=hAt(lx,ly)-drop;};
+  for(let c=0;c<V;c++) put(c*s,0);for(let c=0;c<V;c++) put(c*s,T);for(let r=0;r<V;r++) put(0,r*s);for(let r=0;r<V;r++) put(T,r*s);
+  return out;
+}
+function bestSource(rec){if(rec.E) return rec;for(let k=1;k<=6&&rec.z-k>=0;k++){const f=1<<k,a=store.get((rec.z-k)+"/"+Math.floor(rec.i/f)+"/"+Math.floor(rec.j/f));if(a&&a.E){a.last=++tick;return a;}}return null;}
+function select3d(c){   // leaf tiles for this camera: subdivide while a tile would be big on screen
+  const zmax=clamp(Math.round(view.zoom-.6*Math.sin(view.pitch)),0,S.finest),W=c.W,H=c.H;
+  // ground footprint of the screen, far rays capped
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;const far=c.D*12;
+  for(let k=0;k<=8;k++)for(const sy of [0,H*.25,H*.5,H*.75,H]){const sx=W*k/8,g=c.ground(sx,sy);let X,Y;
+    if(g&&Math.hypot(g[0]-c.cam[0],g[1]-c.cam[1])<far){X=g[0];Y=g[1];}else{const dx=sx-W/2,dy=-(sy-H/2),d=[c.rt[0]*dx+c.up[0]*dy+c.fw[0]*c.f,c.rt[1]*dx+c.up[1]*dy+c.fw[1]*c.f];const L=Math.hypot(d[0],d[1])||1;X=c.cam[0]+d[0]/L*far;Y=c.cam[1]+d[1]/L*far;}
+    if(X<x0)x0=X;if(X>x1)x1=X;if(Y<y0)y0=Y;if(Y>y1)y1=Y;}
+  let z0=Math.max(0,zmax-6);while(z0>0&&((x1-x0)/tileSize(z0)+1)*((y1-y0)/tileSize(z0)+1)>200) z0--;
+  const leaves=[];let budget=600;
+  const visit=(z,i,j)=>{const T=tileSize(z),cx=(i+.5)*T,cy=(j+.5)*T;if(cx+T<x0||cx-T>x1||cy+T<y0||cy-T>y1) return;
+    const d=Math.max(c.near,Math.hypot(cx-c.cam[0],cy-c.cam[1],c.cam[2])-T*.7),px=T*c.f/d;
+    if(z<zmax&&px>400&&budget>0){budget--;visit(z+1,2*i,2*j);visit(z+1,2*i+1,2*j);visit(z+1,2*i,2*j+1);visit(z+1,2*i+1,2*j+1);}
+    else leaves.push([z,i,j,d]);};
+  const T0=tileSize(z0);for(let j=Math.floor(y0/T0);j<=Math.floor(y1/T0);j++)for(let i=Math.floor(x0/T0);i<=Math.floor(x1/T0);i++) visit(z0,i,j);
+  return {leaves,zmax};
+}
+function draw3d(W,H,dpr){
+  if(!gl&&!glInit()) return {z:0,shown:0,missing:0};
+  const pw=Math.round(W*dpr),ph=Math.round(H*dpr);if(glC.width!==pw||glC.height!==ph){glC.width=pw;glC.height=ph;}
+  gl.viewport(0,0,pw,ph);gl.clearColor(.937,.898,.812,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.useProgram(glP);
+  const c=cam3d(W,H),{leaves,zmax}=select3d(c);
+  // view-projection with the camera at the origin: rows are right, up, -forward; perspective from the same focal length as the labels use
+  const n=c.near,fa=c.D*80,a=W/H,fv=c.f/(H/2),M=new Float32Array([
+    c.rt[0]*fv/a, c.up[0]*fv, c.fw[0]*(fa+n)/(fa-n), c.fw[0],
+    c.rt[1]*fv/a, c.up[1]*fv, c.fw[1]*(fa+n)/(fa-n), c.fw[1],
+    c.rt[2]*fv/a, c.up[2]*fv, c.fw[2]*(fa+n)/(fa-n), c.fw[2],
+    0,0,-2*fa*n/(fa-n),0]);
+  gl.uniformMatrix4fv(glLoc.uVP,false,M);gl.uniform1f(glLoc.uEx,c.exag);gl.uniform1f(glLoc.uFog,c.D*5);gl.uniform1i(glLoc.uTex,0);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,glIdx);gl.enableVertexAttribArray(glLoc.aPos);
+  let shown=0,missing=0;
+  leaves.sort((p,q)=>p[3]-q[3]);
+  for(const [z,i,j,d] of leaves){const rec=tileGet(z,i,j,10-Math.min(9,d/c.D));const src=bestSource(rec);
+    if(!rec.E&&z>=2) tileGet(z-2,Math.floor(i/4),Math.floor(j/4),12);   // a coarse stand-in first, so the ground shows while the fine tile is made
+    if(!src){missing++;continue;}
+    if(!rec.E) missing++;else shown++;
+    if(!rec.vbo||rec.meshSrc!==src.key){const v=meshFor(rec,src);if(!rec.vbo) rec.vbo=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,rec.vbo);gl.bufferData(gl.ARRAY_BUFFER,v,gl.STATIC_DRAW);rec.meshSrc=src.key;}
+    if(!src.img) src.img=paintTile(src);
+    if(!src.tex||src.texSrc!==src.img){if(!src.tex) src.tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,src.tex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src.img);
+      gl.generateMipmap(gl.TEXTURE_2D);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);src.texSrc=src.img;}
+    else gl.bindTexture(gl.TEXTURE_2D,src.tex);
+    const T=tileSize(z),f=Math.pow(2,z-src.z);   // the part of the source picture this tile covers
+    gl.uniform4f(glLoc.uUV,(i-src.i*f)/f,(f-1-(j-src.j*f))/f,1/f,1/f);
+    gl.uniform3f(glLoc.uOff,i*T-c.cam[0],j*T-c.cam[1],-c.cam[2]);gl.uniform1f(glLoc.uT,T);
+    gl.bindBuffer(gl.ARRAY_BUFFER,rec.vbo);gl.vertexAttribPointer(glLoc.aPos,3,gl.FLOAT,false,0,0);gl.drawElements(gl.TRIANGLES,glIdxN,gl.UNSIGNED_SHORT,0);}
+  return {z:zmax,shown,missing,leaves:leaves.length};
+}
+
 /* ---------- names: placed on the screen each frame in priority order, never overlapping ---------- */
 let labelBoxes=[];
 function boxFree(b){for(const o of labelBoxes) if(b[0]<o[2]&&b[2]>o[0]&&b[1]<o[3]&&b[3]>o[1]) return false;return true;}
 function localScale(W,H,X,Y){   // metres per pixel at this point of the current view
-  if(view.mode==="plane") return mpp();const q=toScreen(W,H,X,Y);if(!q) return Infinity;const p=(view.mode==="disc"?discInv(W,H):logInv(W,H))(q[0],q[1]);return p?p[2]:Infinity;
+  if(view.mode==="plane") return mpp();if(view.mode==="3d"){const c=cam3d(W,H),q=c.project(X,Y,0);return q?q[2]:Infinity;}const q=toScreen(W,H,X,Y);if(!q) return Infinity;const p=(view.mode==="disc"?discInv(W,H):logInv(W,H))(q[0],q[1]);return p?p[2]:Infinity;
 }
 function drawLabels(ctx,W,H){
   if(!HY||!layers.lLabel) return;const name=getComputedStyle(document.body).getPropertyValue("--name");ctx.save();ctx.textAlign="center";ctx.textBaseline="middle";
@@ -538,9 +644,11 @@ function render(){
   const dpr=Math.min(devicePixelRatio||1,2),W=box.clientWidth,H=box.clientHeight;
   if(mapC.width!==Math.round(W*dpr)||mapC.height!==Math.round(H*dpr)){mapC.width=Math.round(W*dpr);mapC.height=Math.round(H*dpr);}
   const ctx=mapC.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
-  ctx.fillStyle="#efe5cf";ctx.fillRect(0,0,W,H);
   const t0=performance.now();labelBoxes=[];
-  if(view.mode==="plane") stats=drawPlane(ctx,W,H);
+  if(view.mode==="3d"){ctx.clearRect(0,0,W,H);stats=draw3d(W,H,dpr);}
+  else{ctx.fillStyle="#efe5cf";ctx.fillRect(0,0,W,H);}
+  if(view.mode==="3d");
+  else if(view.mode==="plane") stats=drawPlane(ctx,W,H);
   else if(view.mode==="disc") stats=drawProjected(ctx,W,H,discInv(W,H),(X,Y)=>discFwd(W,H,X,Y));
   else stats=drawProjected(ctx,W,H,logInv(W,H),(X,Y)=>logFwd(W,H,X,Y));
   stats.ms=performance.now()-t0;
@@ -551,14 +659,15 @@ function render(){
 let cursor=null;
 function invScreen(W,H,sx,sy){
   if(view.mode==="plane"){const m=mpp();return [view.x+(sx-W/2)*m,view.y-(sy-H/2)*m,m];}
+  if(view.mode==="3d") return cam3d(W,H).ground(sx,sy);
   if(view.mode==="disc") return discInv(W,H)(sx,sy);
   return logInv(W,H)(sx,sy);
 }
 function fmtKm(v){return (v/1000).toFixed(v<1e6?1:0)+" km";}
 function updateHud(){
   const W=box.clientWidth,H=box.clientHeight;let s="";
-  const modeName={plane:"平面",disc:"全体図（円盤）",log:"海図（対数極）"}[view.mode];
-  s+=modeName+(view.mode==="plane"?"  1 px = "+(mpp()>=1000?(mpp()/1000).toFixed(2)+" km":Math.round(mpp())+" m")+"  レベル "+stats.z:"")+(hydroState==="ready"?"":"  川と湖を計算中…")+"\n";
+  const modeName={plane:"平面",disc:"全体図（円盤）",log:"海図（対数極）","3d":"立体"}[view.mode];
+  s+=modeName+(view.mode==="plane"||view.mode==="3d"?"  1 px = "+(mpp()>=1000?(mpp()/1000).toFixed(2)+" km":Math.round(mpp())+" m")+"  レベル "+stats.z:"")+(hydroState==="ready"?"":"  川と湖を計算中…")+"\n";
   const p=cursor&&invScreen(W,H,cursor[0],cursor[1]);
   if(p){const [X,Y]=p,r=Math.hypot(X,Y),th=(Math.atan2(X,Y)*180/Math.PI+360)%360,h=sampleHeight(X,Y,p[2]);
     s+="工学座標  X "+fmtKm(X)+"  Y "+fmtKm(Y)+"\n極座標    r "+fmtKm(r)+"  θ "+th.toFixed(1)+"°  "+(r<=S.litR?"照らされた世界":"辺境")+"\n";
@@ -576,10 +685,17 @@ function updateHud(){
 
 /* ---------- interaction ---------- */
 let drag=null;
-box.addEventListener("pointerdown",ev=>{if(ev.button!==0&&ev.pointerType==="mouse") return;box.setPointerCapture(ev.pointerId);drag={x:ev.clientX,y:ev.clientY};box.classList.add("drag");});
+box.addEventListener("contextmenu",ev=>ev.preventDefault());
+box.addEventListener("pointerdown",ev=>{if(ev.button!==0&&ev.button!==2&&ev.pointerType==="mouse") return;box.setPointerCapture(ev.pointerId);
+  const r=box.getBoundingClientRect(),rot=view.mode==="3d"&&(ev.button===2||ev.shiftKey);
+  drag={x:ev.clientX,y:ev.clientY,rot,g:view.mode==="3d"&&!rot?cam3d(r.width,r.height).ground(ev.clientX-r.left,ev.clientY-r.top):null};box.classList.add("drag");});
 box.addEventListener("pointermove",ev=>{const r=box.getBoundingClientRect();cursor=[ev.clientX-r.left,ev.clientY-r.top];
   if(drag){const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;drag={x:ev.clientX,y:ev.clientY};
     if(view.mode==="plane"){const m=mpp();view.x-=dx*m;view.y+=dy*m;}
+    else if(view.mode==="3d"){
+      if(drag.rot){view.rot=(view.rot+dx*.005)%(2*Math.PI);view.pitch=clamp(view.pitch-dy*.005,0,1.25);}
+      else{const g=drag.g,p=g&&cam3d(r.width,r.height).ground(ev.clientX-r.left,ev.clientY-r.top);
+        if(g&&p){view.x+=g[0]-p[0];view.y+=g[1]-p[1];}else{const m=mpp(),b=view.rot;view.x-=(dx*Math.cos(b)-dy*Math.sin(b))*m;view.y+=(dy*Math.cos(b)+dx*Math.sin(b))*m;}}}
     else if(view.mode==="log"){const ppr=logPPR(box.clientWidth);view.lu-=dx/ppr;view.lv+=dy/ppr;}
     schedule();}
   else updateHud();});
@@ -588,24 +704,32 @@ box.addEventListener("pointerup",endDrag);box.addEventListener("pointercancel",e
 box.addEventListener("wheel",ev=>{ev.preventDefault();const r=box.getBoundingClientRect(),sx=ev.clientX-r.left,sy=ev.clientY-r.top,f=Math.exp(-ev.deltaY*.0015);
   if(view.mode==="plane"){const m=mpp(),X=view.x+(sx-r.width/2)*m,Y=view.y-(sy-r.height/2)*m;
     view.zoom=clamp(view.zoom+Math.log2(f),-3,S.finest+1);const m2=mpp();view.x=X-(sx-r.width/2)*m2;view.y=Y+(sy-r.height/2)*m2;}
+  else if(view.mode==="3d"){const g=cam3d(r.width,r.height).ground(sx,sy);view.zoom=clamp(view.zoom+Math.log2(f),-3,S.finest+1);
+    const p=g&&cam3d(r.width,r.height).ground(sx,sy);if(g&&p){view.x+=g[0]-p[0];view.y+=g[1]-p[1];}}
   else if(view.mode==="log"){const p0=logPPR(r.width);view.lz=clamp(view.lz+Math.log2(f),-1,8);const p1=logPPR(r.width);
     view.lu+=(sx-r.width/2)*(1/p0-1/p1);view.lv-=(sy-r.height/2)*(1/p0-1/p1);}
   schedule();saveView();},{passive:false});
 let pinch=null;
-box.addEventListener("touchstart",ev=>{if(ev.touches.length===2){pinch=Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY);drag=null;}},{passive:true});
-box.addEventListener("touchmove",ev=>{if(ev.touches.length===2&&pinch){const d=Math.hypot(ev.touches[0].clientX-ev.touches[1].clientX,ev.touches[0].clientY-ev.touches[1].clientY);
-  if(view.mode==="plane") view.zoom=clamp(view.zoom+Math.log2(d/pinch),-3,S.finest+1);else if(view.mode==="log") view.lz=clamp(view.lz+Math.log2(d/pinch),-1,8);pinch=d;schedule();}},{passive:true});
+const fingers=ev=>{const a=ev.touches[0],b=ev.touches[1];return {d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),ang:Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX),my:(a.clientY+b.clientY)/2};};
+box.addEventListener("touchstart",ev=>{if(ev.touches.length===2){pinch=fingers(ev);drag=null;}},{passive:true});
+box.addEventListener("touchmove",ev=>{if(ev.touches.length===2&&pinch){const g=fingers(ev),f=g.d/pinch.d;
+  if(view.mode==="plane"||view.mode==="3d") view.zoom=clamp(view.zoom+Math.log2(f),-3,S.finest+1);else if(view.mode==="log") view.lz=clamp(view.lz+Math.log2(f),-1,8);
+  if(view.mode==="3d"){let da=g.ang-pinch.ang;if(da>Math.PI) da-=2*Math.PI;if(da<-Math.PI) da+=2*Math.PI;view.rot=(view.rot-da)%(2*Math.PI);view.pitch=clamp(view.pitch-(g.my-pinch.my)*.006,0,1.25);}
+  pinch=g;schedule();}},{passive:true});
 box.addEventListener("touchend",()=>{pinch=null;});
 window.addEventListener("keydown",ev=>{if(ev.key==="F2"){ev.preventDefault();dbg.hidden=!dbg.hidden;updateHud();}
-  if(ev.key==="+"||ev.key==="="){view.zoom=clamp(view.zoom+.5,-3,S.finest+1);schedule();}if(ev.key==="-"){view.zoom=clamp(view.zoom-.5,-3,S.finest+1);schedule();}});
+  if(ev.key==="+"||ev.key==="="){view.zoom=clamp(view.zoom+.5,-3,S.finest+1);schedule();}if(ev.key==="-"){view.zoom=clamp(view.zoom-.5,-3,S.finest+1);schedule();}
+  if(view.mode==="3d"){const k=ev.key.toLowerCase();if(k==="q"){view.rot-=.1;schedule();}if(k==="e"){view.rot+=.1;schedule();}if(k==="r"){view.pitch=clamp(view.pitch+.08,0,1.25);schedule();}if(k==="f"){view.pitch=clamp(view.pitch-.08,0,1.25);schedule();}}});
 // switching between the plane and the chart keeps the same place and scale on screen
 function syncModes(from,to){const W=box.clientWidth;
   if(from==="plane"&&to==="log"){const r=Math.hypot(view.x,view.y);view.lu=Math.atan2(view.x,view.y);
     if(r<.25*W*mpp()){view.lv=0;view.lz=0;}else{view.lv=Math.log(r/S.litR);view.lz=clamp(Math.log2(r/mpp()*2*Math.PI/W),-1,8);}}
   if(from==="log"&&to==="plane"){const r=S.litR*Math.exp(view.lv);view.x=r*Math.sin(view.lu);view.y=r*Math.cos(view.lu);view.zoom=clamp(Math.log2(32768/(r/logPPR(W))),-3,S.finest+1);}
 }
-function setMode(m){syncModes(view.mode,m);view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"]]) $(id).classList.toggle("on",k===m);schedule();saveView();}
-$("mPlane").onclick=()=>setMode("plane");$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
+function setMode(m){if(m==="3d"&&view.mode==="log"){syncModes("log","plane");view.mode="plane";}if(view.mode==="3d"&&m==="log"){syncModes("plane","log");}else syncModes(view.mode,m);
+  view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"],["m3d","3d"]]) $(id).classList.toggle("on",k===m);glC.hidden=m!=="3d";$("northUp").hidden=m!=="3d";schedule();saveView();}
+$("mPlane").onclick=()=>setMode("plane");$("m3d").onclick=()=>setMode("3d");$("northUp").onclick=()=>{view.rot=0;schedule();saveView();};$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
+$("gear").onclick=()=>{document.querySelector("header").classList.toggle("open");setTimeout(()=>schedule(),0);};
 $("home").onclick=()=>{view.x=0;view.y=0;view.zoom=1.2;view.lu=0;view.lv=0;view.lz=0;schedule();saveView();};
 /* ---------- an imported world: the .sfw file from 地形工房 (magic, header length, JSON header, Int16 heights) ---------- */
 function parseSfw(buf,fname){
@@ -641,7 +765,7 @@ $("worldFile").onchange=ev=>{const f=ev.target.files[0];if(f) loadWorldFile(f);e
 $("worldOff").onclick=()=>{applyWorld(null);idbPut("world",null);};
 box.addEventListener("dragover",ev=>{ev.preventDefault();});
 box.addEventListener("drop",ev=>{ev.preventDefault();const f=ev.dataTransfer.files&&ev.dataTransfer.files[0];if(f) loadWorldFile(f);});
-function resetTiles(){store.clear();queue.length=0;lastTile.E=null;hydroStart();schedule();}
+function resetTiles(){for(const r of store.values()) freeGL(r);store.clear();queue.length=0;lastTile.E=null;hydroStart();schedule();}
 $("seed").onchange=()=>{S.seed=+$("seed").value|0;resetTiles();saveView();};
 $("reseed").onclick=()=>{$("seed").value=Math.floor(Math.random()*1e6);$("seed").onchange();};
 $("finest").onchange=()=>{S.finest=clamp(+$("finest").value|0,6,12);$("finest").value=S.finest;schedule();saveView();};
