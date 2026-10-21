@@ -45,7 +45,7 @@ input[type=number],input[type=text],select,textarea{background:#f6efdf;border:1p
 .v3d .bar h2{margin:0;font-size:16px}
 .v3d .bar label{display:flex;align-items:center;gap:6px;font-size:12.5px}
 .v3d .bar .sp{flex:1}
-.v3d .stage{position:relative;flex:1;min-height:0;touch-action:none}
+.v3d .stage{position:relative;flex:1;min-height:0;touch-action:none;background:linear-gradient(#d9ccae 0%,#e6dcc4 55%,#e6dcc4 100%)}
 .v3d .stage canvas{display:block;width:100%;height:100%}
 .dbg{position:fixed;left:8px;bottom:8px;z-index:60;font:12px/1.5 "IBM Plex Mono",monospace;white-space:pre;background:rgba(30,22,14,.82);color:#f3ead6;padding:6px 10px;border-radius:3px;pointer-events:none}
 .dbg[hidden]{display:none}
@@ -144,14 +144,15 @@ body.maxed{overflow:hidden}
 <div class="v3d" id="v3d" hidden role="dialog" aria-label="3Dの地形">
   <div class="bar">
     <h2>3Dの地形</h2>
-    <label>高さの強調 <input type="range" id="v3dEx" min="1" max="200" step="1" value="20"><span id="v3dExV">20倍</span></label>
-    <label>海の深さ <input type="range" id="v3dSea" min="5" max="100" step="5" value="30"><span id="v3dSeaV">30%</span></label>
+    <label>高さの強調 <input type="range" id="v3dEx" min="1" max="200" step=".5" value="2"><span id="v3dExV">2倍</span></label>
+    <label>海の深さ <input type="range" id="v3dSea" min="5" max="100" step="5" value="100"><span id="v3dSeaV">100%</span></label>
     <label><input type="checkbox" id="v3dWater" checked> 海面を表示</label>
     <label><input type="checkbox" id="v3dLines" checked> 地図の線（等高線・川）</label>
+    <button type="button" id="v3dLow">低い視点</button><button type="button" id="v3dTop">真上から</button>
     <span class="sp"></span>
     <button type="button" id="v3dClose">閉じる（Esc）</button>
   </div>
-  <div class="stage" id="v3dStage"><div class="msg" id="v3dMsg">ドラッグで回す、右ドラッグか2本指で動かす、ホイールかピンチで寄る</div></div>
+  <div class="stage" id="v3dStage"><div class="msg" id="v3dMsg">ドラッグで動かす、右ドラッグか2本指で回す・傾ける、ホイールかピンチで寄る</div></div>
 </div>
 <div class="top">
   <div class="mapbox" id="mapbox">
@@ -420,15 +421,19 @@ boundary:{name:"プレート境界",ins:["s","cc","ccRift","oS","oRift","oMtn","
   return {s:s,add:add,mtn:mtn};
  }},
 profile:{name:"断面（大陸棚→斜面→深海）",ins:["s"],outs:["e"],
- params:[{k:"shelfKm",l:"大陸棚の幅 km",min:5,max:400,step:5,v:80},{k:"shelfEdge",l:"大陸棚の縁の水深 m",min:50,max:400,step:10,v:140},{k:"abyss",l:"深海平原の水深 m",min:2000,max:7000,step:100,v:4000},{k:"landH",l:"内陸の高台 m",min:100,max:3000,step:50,v:900}],
+ params:[{k:"shelfKm",l:"大陸棚の幅 km（目安）",min:5,max:400,step:5,v:60},{k:"shelfEdge",l:"大陸棚の縁の水深 m",min:50,max:400,step:10,v:140},
+         {k:"slopeKm",l:"大陸斜面の幅 km（目安）",min:10,max:300,step:5,v:40},{k:"riseKm",l:"深海へのなだらかな裾 km（目安）",min:0,max:800,step:10,v:150},
+         {k:"abyss",l:"深海平原の水深 m",min:2000,max:7000,step:100,v:4000},{k:"landH",l:"内陸の高台 m",min:100,max:3000,step:50,v:900}],
  fn:function(x,y,inp,p,seed,lib){
-  const s=inp.s,sb=p.shelfKm*.00055,sl=.03;
+  // s は海岸付近でおよそ 1km あたり 0.0011 変わる（沖へ行くほどゆるむ）ので、幅 km はこの割合で s に直した目安
+  // 海岸 → 大陸棚（ゆるやか）→ 大陸斜面（数度の急な坂）→ 裾（コンチネンタルライズ、何百kmもかけて深海平原へ）
+  const s=inp.s,g=.0011,sb=p.shelfKm*g,ss=p.slopeKm*g,rs=Math.max(1e-6,p.riseKm*g),foot=-Math.min(p.abyss-200,Math.max(p.shelfEdge+200,p.abyss*.6));
   let e;
-  // 陸と海は 0m で、同じ傾きでつながる（段差や傾きの差があると、拡大したとき海岸に崖や平らな帯ができる）
   if(s>=0) e=p.shelfEdge/sb*s*Math.exp(-s/.02)+p.landH*.65*lib.smooth(0,.25,s)+p.landH*.35*lib.smooth(.15,.6,s);
   else if(s>=-sb) e=-p.shelfEdge*(-s/sb);
-  else if(s>=-sb-sl) e=-p.shelfEdge-(p.abyss-p.shelfEdge)*lib.smooth(0,1,(-s-sb)/sl);
-  else e=-p.abyss-600*lib.smooth(0,.3,-s-sb-sl);
+  else if(s>=-sb-ss) e=-p.shelfEdge+(foot+p.shelfEdge)*lib.smooth(0,1,(-s-sb)/ss);
+  else if(s>=-sb-ss-rs) e=foot-(p.abyss+foot)*(1-Math.pow(1-(-s-sb-ss)/rs,2));
+  else e=-p.abyss-600*lib.smooth(0,.3,-s-sb-ss-rs);
   return {e:e};
  }},
 add:{name:"足し算",ins:["a","b"],outs:["e"],params:[{k:"k",l:"b の倍率",min:0,max:2,step:.05,v:1}],
@@ -570,7 +575,7 @@ function save(){try{localStorage.setItem("sf-terrain-graph-v3",JSON.stringify({g
 function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-v3")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
 G2=load()||(()=>{const g=defaultGraph();G2=g;autoLayout();return g;})();
 // built-in code from an older version of this page is brought up to date; code someone edited is left alone
-const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["const C={cc:0,ccRift:0,oS:0","if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH"],seamounts:["if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));"]};
+const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["const C={cc:0,ccRift:0,oS:0","if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH","const s=inp.s,sb=p.shelfKm*.00055,sl=.03;"],seamounts:["if(d2<1) add=Math.max(add,h*Math.pow(1-d2,1.5));"]};
 function upgradeGraph(g){g.nodes.forEach(n=>{
   // parameters added to a built-in type later start at their defaults
   if(TYPES[n.type]&&n.params) TYPES[n.type].params.forEach(q=>{if(!(q.k in n.params)) n.params[q.k]=q.v;});
@@ -1262,8 +1267,8 @@ function loadScript(src){return new Promise((res,rej)=>{const s=document.createE
 async function open3D(){
   if(!grid||grid.PV) return;
   const el=document.getElementById("v3d"),msg=document.getElementById("v3dMsg");el.hidden=false;V3.on=true;
-  // a whole-world view needs strong exaggeration to show any relief at all, a close view very little
-  const ex=clamp(Math.round(grid.w/150),1,200),exEl=document.getElementById("v3dEx");exEl.value=ex;document.getElementById("v3dExV").textContent=ex+"倍";
+  // as in an aerial view, close views are shown near true scale; a whole-world view needs exaggeration to show any relief at all
+  const ex=clamp(Math.round(grid.w/300*2)/2,1.5,200),exEl=document.getElementById("v3dEx");exEl.value=ex;document.getElementById("v3dExV").textContent=ex+"倍";
   try{
     if(!window.THREE) await loadScript("https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js");
     if(!THREE.OrbitControls) await loadScript("https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js");
@@ -1273,9 +1278,9 @@ async function open3D(){
 function close3D(){
   const el=document.getElementById("v3d");el.hidden=true;V3.on=false;
   if(V3.raf) cancelAnimationFrame(V3.raf);
-  if(V3.r){V3.scene.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){if(o.material.map)o.material.map.dispose();o.material.dispose();}});
+  if(V3.r){V3.scene.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){if(o.material.map)o.material.map.dispose();if(o.material.alphaMap)o.material.alphaMap.dispose();o.material.dispose();}});
     V3.r.dispose();V3.r.domElement.remove();V3.ro&&V3.ro.disconnect();V3.ctl.dispose();}
-  V3.r=null;
+  V3.r=null;V3.far=null;
 }
 function build3D(){
   const stage=document.getElementById("v3dStage"),{Nx,Ny,E,w}=grid,h=w*Ny/Nx;
@@ -1284,31 +1289,53 @@ function build3D(){
   if(lines){tex.width=mapC.width;tex.height=mapC.height;const t=tex.getContext("2d");t.drawImage(mapC,0,0);
     if(layers.lRiver&&riverC.width) t.drawImage(riverC,0,0,tex.width,tex.height);}
   else{tex.width=reliefC.width;tex.height=reliefC.height;tex.getContext("2d").drawImage(reliefC,0,0);}
-  const r=new THREE.WebGLRenderer({antialias:true});r.setPixelRatio(Math.min(devicePixelRatio||1,2));
-  r.setClearColor(0xefe5cf);stage.prepend(r.domElement);
-  const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,1,w/2000,w*20);
-  scene.fog=new THREE.Fog(0xefe5cf,w*1.4,w*3.2);
+  const r=new THREE.WebGLRenderer({antialias:true,alpha:true});r.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  r.setClearColor(0xefe5cf,0);stage.prepend(r.domElement);
+  const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(40,1,w/5000,w*40);
+  // distance haze in the colour of the paper, thickening with distance from the camera, so the land fades toward the horizon
+  scene.fog=new THREE.Fog(0xe6dcc4,1,2);
   // map x to the right, map y towards the viewer; heights in km times the exaggeration
   const geo=new THREE.PlaneGeometry(w,h,Nx-1,Ny-1);geo.rotateX(-Math.PI/2);
   const map=new THREE.CanvasTexture(tex);map.anisotropy=r.capabilities.getMaxAnisotropy();
   if(THREE.sRGBEncoding) map.encoding=THREE.sRGBEncoding;
-  const mesh=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({map}));scene.add(mesh);
-  const water=new THREE.Mesh(new THREE.PlaneGeometry(w,h).rotateX(-Math.PI/2),new THREE.MeshLambertMaterial({color:0x8fb0b4,transparent:true,opacity:.42,depthWrite:false}));
+  // the detailed map fades out toward its edges into the coarse land around it, so there is no hard border
+  const am=document.createElement("canvas");am.width=am.height=64;{const a=am.getContext("2d"),im=a.createImageData(64,64);
+    for(let j=0;j<64;j++)for(let i=0;i<64;i++){const t=Math.min(i,63-i,j,63-j)/63/.08,v=Math.round(255*smooth(0,1,t));const o=4*(j*64+i);im.data[o]=im.data[o+1]=im.data[o+2]=v;im.data[o+3]=255;}
+    a.putImageData(im,0,0);}
+  const mesh=new THREE.Mesh(geo,new THREE.MeshLambertMaterial({map,alphaMap:new THREE.CanvasTexture(am),transparent:true}));mesh.renderOrder=1;scene.add(mesh);
+  // beyond the area on screen the land runs on to the horizon: a coarse terrain 5 times as wide (no rivers, plain colours),
+  // laid a hair below the detailed one so the two do not flicker where they overlap
+  const F=5,FN=200,FM=Math.max(2,Math.round(FN*Ny/Nx)),fv={cx:grid.cx,cy:grid.cy,w:w*F,h:h*F};let FE=null;
+  try{const keep=lib.pxKm;lib.noRegion=true;FE=evalRows(plan(),fv,FN,FM,fv.w/FN,0,FM,null,{}).E;lib.noRegion=false;lib.pxKm=keep;}catch(e){lib.noRegion=false;}
+  if(FE){const fc=document.createElement("canvas");fc.width=FN;fc.height=FM;const fx=fc.getContext("2d"),fi=fx.createImageData(FN,FM);
+    for(let k=0;k<FN*FM;k++){const e=FE[k],col=e>=0?landCol(e):seaCol(e);fi.data[4*k]=col[0];fi.data[4*k+1]=col[1];fi.data[4*k+2]=col[2];fi.data[4*k+3]=255;}
+    fx.putImageData(fi,0,0);const ftex=new THREE.CanvasTexture(fc);ftex.encoding=THREE.sRGBEncoding;
+    const fg=new THREE.PlaneGeometry(w*F,h*F,FN-1,FM-1);fg.rotateX(-Math.PI/2);
+    const farMesh=new THREE.Mesh(fg,new THREE.MeshLambertMaterial({map:ftex}));farMesh.position.y=-w*.0006;scene.add(farMesh);
+    V3.far={fg,FE,FN,FM};}
+  const water=new THREE.Mesh(new THREE.PlaneGeometry(w*F,h*F).rotateX(-Math.PI/2),new THREE.MeshLambertMaterial({color:0x8fb0b4,transparent:true,opacity:.42,depthWrite:false}));
   scene.add(water);
   scene.add(new THREE.HemisphereLight(0xfff6e6,0x6b5440,.75));
   const sun=new THREE.DirectionalLight(0xffffff,.65);sun.position.set(-1,1.2,-.6);scene.add(sun);
   r.outputEncoding=THREE.sRGBEncoding||r.outputEncoding;
-  const ctl=new THREE.OrbitControls(cam,r.domElement);ctl.enableDamping=true;ctl.maxPolarAngle=Math.PI*.49;ctl.minDistance=w/200;ctl.maxDistance=w*3;
-  cam.position.set(0,w*.55,w*.75);ctl.target.set(0,0,0);ctl.update();
+  // map-style handling as in an online map: drag moves over the land, right drag turns and tilts
+  const ctl=new (THREE.MapControls||THREE.OrbitControls)(cam,r.domElement);ctl.enableDamping=true;ctl.dampingFactor=.12;ctl.screenSpacePanning=false;
+  ctl.maxPolarAngle=Math.PI*.48;ctl.minDistance=w/400;ctl.maxDistance=w*3;
+  V3.view=(low)=>{if(low){cam.position.set(0,w*.24,w*.62);ctl.target.set(0,0,-w*.05);}else{cam.position.set(0,w*1.25,w*.001);ctl.target.set(0,0,0);}ctl.update();};
+  V3.view(true);
   Object.assign(V3,{r,scene,cam,ctl,geo,water,mesh});
   const pos=geo.attributes.position;
   // the deep sea is several km deep, so with the land exaggerated it would turn into walls; it is shown shallower by its own factor
-  V3.setEx=ex=>{const sf=+document.getElementById("v3dSea").value/100;for(let k=0;k<Nx*Ny;k++){let e=E[k];if(!isFinite(e))e=0;if(e<0)e*=sf;pos.setY(k,e/1000*ex);}pos.needsUpdate=true;geo.computeVertexNormals();};
+  const lift=(P,A,n,ex,sf)=>{for(let k=0;k<n;k++){let e=A[k];if(!isFinite(e))e=0;if(e<0)e*=sf;P.setY(k,e/1000*ex);}P.needsUpdate=true;};
+  V3.setEx=ex=>{const sf=+document.getElementById("v3dSea").value/100;lift(pos,E,Nx*Ny,ex,sf);geo.computeVertexNormals();
+    if(V3.far){const f=V3.far;lift(f.fg.attributes.position,f.FE,f.FN*f.FM,ex,sf);f.fg.computeVertexNormals();}};
   V3.setEx(+document.getElementById("v3dEx").value);
   water.visible=document.getElementById("v3dWater").checked;
   const size=()=>{const W=stage.clientWidth,H=stage.clientHeight;r.setSize(W,H,false);cam.aspect=W/H;cam.updateProjectionMatrix();};
   V3.ro=new ResizeObserver(size);V3.ro.observe(stage);size();
-  const loop=()=>{if(!V3.on)return;ctl.update();r.render(scene,cam);V3.raf=requestAnimationFrame(loop);};loop();
+  const loop=()=>{if(!V3.on)return;ctl.update();
+    const dist=cam.position.distanceTo(ctl.target);scene.fog.near=dist*.6;scene.fog.far=dist*3.2;
+    r.render(scene,cam);V3.raf=requestAnimationFrame(loop);};loop();
 }
 
 /* ---------- debug readout (F2): where the view is, where the camera looks, what is under the cursor ---------- */
@@ -1354,6 +1381,8 @@ document.getElementById("v3dClose").onclick=close3D;
 document.addEventListener("keydown",ev=>{if(ev.key==="Escape"&&V3.on){ev.v3d=true;close3D();}});
 document.getElementById("v3dEx").addEventListener("input",ev=>{document.getElementById("v3dExV").textContent=ev.target.value+"倍";if(V3.setEx)V3.setEx(+ev.target.value);});
 document.getElementById("v3dSea").addEventListener("input",ev=>{document.getElementById("v3dSeaV").textContent=ev.target.value+"%";if(V3.setEx)V3.setEx(+document.getElementById("v3dEx").value);});
+document.getElementById("v3dLow").onclick=()=>V3.view&&V3.view(true);
+document.getElementById("v3dTop").onclick=()=>V3.view&&V3.view(false);
 document.getElementById("v3dWater").addEventListener("change",ev=>{if(V3.water)V3.water.visible=ev.target.checked;});
 document.getElementById("v3dLines").addEventListener("change",()=>{if(V3.r){const c=V3.cam.position.clone(),t=V3.ctl.target.clone();close3D();document.getElementById("v3d").hidden=false;V3.on=true;build3D();V3.cam.position.copy(c);V3.ctl.target.copy(t);}});
 
@@ -1590,6 +1619,8 @@ const HELP={
      rift:"上げると離れていく境目が深く裂け、細長い湾や地溝帯ができます。"}},
  profile:{d:"s（陸か海かの度合い）を実際の標高 m に直します。海岸から大陸棚→大陸斜面→深海平原と深くなります。",
   p:{shelfKm:"上げると浅い海（大陸棚）が沖まで広がります。航路や漁場になる浅瀬の広さです。",shelfEdge:"大陸棚の端の深さです。",
+     slopeKm:"大陸棚の先の急な坂（大陸斜面）の幅です。上げると坂がゆるやかになり、深海までの距離が延びます。",
+     riseKm:"斜面のふもとから深海平原まで、ゆっくり深くなる裾の長さです。上げると沖まで中くらいの深さが続きます。0で斜面からすぐ深海になります。",
      abyss:"上げると外洋がより深くなります。",landH:"上げると内陸が全体に高い台地になります。下げると低地が広がります。"}},
  add:{d:"a に b を足します（b は倍率をかけてから）。山の高さなどを重ねるのに使います。",p:{k:"b をどれだけ効かせるかです。0で b を無視します。"}},
  mountains:{d:"プレート境界がぶつかる所（mtn）に、尾根の連なる山脈を立てます。",
