@@ -294,12 +294,14 @@ const lib={noise,fbm,ridged,rnd,smooth,clamp,pxKm:10,litR:2200,octFor(base){retu
 
 /* ---------- node types: real functions, shown as editable text ---------- */
 const TYPES={
-plates:{name:"プレート",ins:[],outs:["bias","bd","closing","cont","other","upper","id"],
+plates:{name:"プレート",ins:[],outs:["bias","bd","closing","cont","other","upper","id","cc","ccRift","oS","oRift","oMtn","trench","arc","ridge","axis"],
  params:[{k:"plateKm",l:"プレートの大きさ km",min:200,max:5000,step:50,v:950},{k:"contFrac",l:"大陸プレートの割合",min:.05,max:.9,step:.01,v:.38},{k:"warp",l:"境界のゆがみ",min:0,max:.9,step:.01,v:.45},{k:"lift",l:"大陸の底上げ",min:0,max:.6,step:.01,v:.22}],
  fn:function(x,y,inp,p,seed,lib){
   const ps=p.plateKm;
   let qx=x/ps,qy=y/ps;
-  const wx=lib.fbm(qx*1.1,qy*1.1,seed+1,3,.5)*p.warp, wy=lib.fbm(qx*1.1+5.2,qy*1.1+1.3,seed+2,3,.5)*p.warp;
+  // 境界のゆがみは大きな曲がりから数十kmの細かな出入りまで重ねる（重ねが少ないと、拡大したとき境界が直線に見える）
+  const wo=Math.max(3,Math.min(7,Math.ceil(Math.log2(ps/(1.1*25))))),wg=.55;
+  const wx=lib.fbm(qx*1.1,qy*1.1,seed+1,wo,wg)*p.warp, wy=lib.fbm(qx*1.1+5.2,qy*1.1+1.3,seed+2,wo,wg)*p.warp;
   qx+=wx;qy+=wy;
   const cx=Math.floor(qx),cy=Math.floor(qy),S=[];
   let d1=1e9,a=0;
@@ -307,23 +309,40 @@ plates:{name:"プレート",ins:[],outs:["bias","bd","closing","cont","other","u
     const px=i+.1+.8*lib.rnd(i,j,seed+11),py=j+.1+.8*lib.rnd(i,j,seed+12),d=(px-qx)*(px-qx)+(py-qy)*(py-qy);
     S.push([i,j,px,py,d]);if(d<d1){d1=d;a=S.length-1;}
   }
-  const plate=(i,j)=>({cont:lib.rnd(i,j,seed+3)<p.contFrac,a:lib.rnd(i,j,seed+4)*6.2832,v:.3+.7*lib.rnd(i,j,seed+5),r:lib.rnd(i,j,seed+7)});
+  const plate=(i,j)=>{const an=lib.rnd(i,j,seed+4)*6.2832,v=.3+.7*lib.rnd(i,j,seed+5);return {cont:lib.rnd(i,j,seed+3)<p.contFrac,vx:Math.cos(an)*v,vy:Math.sin(an)*v,r:lib.rnd(i,j,seed+7)};};
   const [i1,j1,ax,ay]=S[a],A=plate(i1,j1);
-  // 自分のプレートの縁までの距離は、隣の各プレートとの境界線までの距離の最小。
-  // 隣が複数あるときは近い境界ほど重くして混ぜる（一番近い隣だけを見ると、隣が切り替わる線で段差ができる）
-  let bd=1e9;const B=[];
-  for(let k=0;k<S.length;k++){if(k===a)continue;const [i,j,bx,by,d]=S[k];
-    let nx=bx-ax,ny=by-ay;const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
-    const dk=(d-d1)/(2*nl)*ps;          // km to this neighbour's boundary
-    B.push([dk,nx,ny,i,j]);if(dk<bd)bd=dk;}
-  let ws=0,closing=0,other=0,upper=0,b2=0;
-  for(const [dk,nx,ny,i,j] of B){if(dk-bd>550)continue;const w=Math.exp(-(dk-bd)/60);const P=plate(i,j);ws+=w;
-    closing+=w*((Math.cos(A.a)*A.v-Math.cos(P.a)*P.v)*nx+(Math.sin(A.a)*A.v-Math.sin(P.a)*P.v)*ny)/2;
-    other+=w*(P.cont?1:0);upper+=w*(A.r>P.r?1:0);b2+=w*(P.cont?p.lift:-p.lift);}
-  closing/=ws;other/=ws;upper/=ws;b2/=ws;
-  const b1=A.cont?p.lift:-p.lift;
-  const t=.5+.5*lib.smooth(0,1,bd/400);
-  return {bias:b2+(b1-b2)*t,bd:bd,closing:closing,cont:A.cont?1:0,other:other,upper:upper,id:i1*7919+j1*104729};
+  // e = おおよそ「そのプレートとの境界までの km」（自分のプレートは 0）
+  const near=[];let bd=1e9;
+  for(let k=0;k<S.length;k++){const [i,j,bx,by,d]=S[k],e=(d-d1)*ps/2;
+    if(k!==a){const nl=Math.hypot(bx-ax,by-ay)||1,dk=(d-d1)/(2*nl)*ps;if(dk<bd)bd=dk;}
+    if(e<800) near.push({e,x:bx,y:by,d,P:k===a?A:plate(i,j)});}
+  // 1. 底上げ: 近いプレートほど重く混ぜる（重みは境界の両側で同じ）
+  let wb=0,bias=0;for(const q of near){const v=Math.exp(-q.e/150)-Math.exp(-800/150);wb+=v;bias+=v*(q.P.cont?p.lift:-p.lift);}
+  // 2. 境界の効果: 近くの「プレートの組」ごとに、その組の境界からの距離で計算して混ぜる。
+  //    組の重みは両方のプレートの近さで決まり、どちら側から見ても同じなので、境界でも三重点でも段差ができない
+  const g=(X,c,w)=>Math.exp(-((X-c)/w)*((X-c)/w));
+  const C={cc:0,ccRift:0,oS:0,oRift:0,oMtn:0,trench:0,arc:0,ridge:0,axis:0};
+  let wsum=0,closing=0,other=0,upper=0,ow=0,em=1e9;
+  const pairs=[],ai=near.findIndex(q=>q.P===A);
+  let e2=1e9;for(let m=0;m<near.length;m++) if(m!==ai&&near[m].e<e2) e2=near[m].e;   // the closest pair is (own, nearest neighbour)
+  for(let m=0;m<near.length;m++){if(near[m].e>e2+300)continue;for(let n=m+1;n<near.length;n++){if(near[n].e>e2+300)continue;const t=near[m].e+near[n].e;if(t<em)em=t;pairs.push([m,n,t]);}}
+  for(const [m,n,t] of pairs){if(t-em>300)continue;const w=Math.exp(-(t-em)/30);wsum+=w;
+    const I=near[m],J=near[n];let nx=J.x-I.x,ny=J.y-I.y;const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
+    const X=(J.d-I.d)/(2*nl)*ps;                                    // I の側で正、境界からの km
+    const cl=((I.P.vx-J.P.vx)*nx+(I.P.vy-J.P.vy)*ny)/2;
+    const conv=Math.max(0,cl),div=Math.max(0,-cl);
+    const cc=conv*g(X,0,350),ccr=div*g(X,0,150);C.cc+=w*cc;C.ccRift+=w*ccr;   // 陸どうしとして見たとき（山脈と地溝）
+    if(I.P.cont&&J.P.cont){C.oS+=w*.25*cc;C.oRift+=w*ccr;C.oMtn+=w*cc;}
+    else if(I.P.cont||J.P.cont){const Xc=I.P.cont?X:-X;                       // 大陸側から測った距離
+      C.oS+=w*.2*conv*g(Xc,100,250);C.oRift+=w*.5*div*g(Xc,0,120);C.oMtn+=w*.8*conv*g(Xc,150,180);C.trench+=w*conv*g(Xc,-50,45);}
+    else{const Y=I.P.r>J.P.r?-X:X;                                           // 沈む側から測った距離
+      C.arc+=w*conv*g(Y,-130,35);C.trench+=w*conv*g(Y,40,40);C.ridge+=w*div*g(Y,0,350);C.axis+=w*div*g(Y,0,12);}
+    // 表示用: 自分のプレートを含む組の平均
+    if(m===ai||n===ai){const O=m===ai?J:I;ow+=w;closing+=w*cl;other+=w*(O.P.cont?1:0);upper+=w*(A.r>O.P.r?1:0);}
+  }
+  for(const k in C) C[k]/=wsum||1;
+  if(ow>0){closing/=ow;other/=ow;upper/=ow;}
+  return {bias:bias/wb,bd:bd,closing:closing,cont:A.cont?1:0,other:other,upper:upper,id:i1*7919+j1*104729,...C};
  }},
 mega:{name:"巨大大陸",ins:[],outs:["mega"],
  params:[{k:"sizeKm",l:"大陸の半径 km",min:300,max:12000,step:50,v:1400},{k:"prob",l:"出る確率（升目ごと）",min:0,max:1,step:.01,v:.45},{k:"strength",l:"持ち上げる強さ",min:0,max:1.2,step:.01,v:.55},{k:"rough",l:"輪郭のゆがみ",min:0,max:1,step:.01,v:.45},{k:"center",l:"中心に必ず置く（0か1）",min:0,max:1,step:1,v:1}],
@@ -349,24 +368,15 @@ shape:{name:"大陸の形",ins:["bias","mega"],outs:["s"],
   const o=lib.octFor(p.scaleKm);
   return {s:lib.fbm(x/p.scaleKm,y/p.scaleKm,seed,o,gain)*.55+inp.bias+inp.mega-p.sea};
  }},
-boundary:{name:"プレート境界",ins:["s","bd","closing","cont","other","upper"],outs:["s","add","mtn"],
+boundary:{name:"プレート境界",ins:["s","cc","ccRift","oS","oRift","oMtn","trench","arc","ridge","axis"],outs:["s","add","mtn"],
  params:[{k:"trench",l:"海溝の深さ m",min:0,max:6000,step:100,v:3500},{k:"ridge",l:"海嶺の高さ m",min:0,max:4000,step:100,v:2200},{k:"arc",l:"弧状列島の高さ m",min:0,max:6000,step:100,v:4300},{k:"rift",l:"地溝の強さ",min:0,max:.6,step:.01,v:.2}],
  fn:function(x,y,inp,p,seed,lib){
-  const bd=inp.bd,conv=Math.max(0,inp.closing),div=Math.max(0,-inp.closing);
-  const g=(c,w,X=bd)=>Math.exp(-((X-c)/w)*((X-c)/w));
-  // other（相手が大陸の割合）と upper（自分が上になる割合）は 0〜1。境界の種類ごとの効果を割合で混ぜる。
-  // 片側の効果は「大陸側から測った距離 X」「沈む側から測った距離 Y」の関数で書き、境界の両側で同じ式を使う（境界で段差を作らない）
-  const o=inp.other,u=inp.upper,noi=.55+.45*lib.noise(x/60,y/60,seed);let s=inp.s,add=0,mtn=0;
-  const contOcean=X=>{s+=w*(.2*conv*g(100,250,X)-p.rift*.5*div*g(0,120,X));mtn+=w*.8*conv*g(150,180,X);add-=w*p.trench*conv*g(-50,45,X);};
-  const oceanOcean=Y=>{add+=w*(p.arc*conv*g(-130,35,Y)*noi-p.trench*conv*g(40,40,Y)+p.ridge*div*g(0,350,Y)-500*div*g(0,12,Y));};
-  let w;
-  if(inp.cont){
-    w=o;s+=w*(.25*conv*g(0,350)-p.rift*div*g(0,150));mtn+=w*conv*g(0,350);   // 大陸と大陸
-    w=1-o;contOcean(bd);                                                     // 自分が大陸、相手が海洋
-  }else{
-    w=o;contOcean(-bd);                                                      // 自分が海洋、相手が大陸（沈み込む側）
-    w=(1-o)*(1-u);oceanOcean(bd);w=(1-o)*u;oceanOcean(-bd);                  // 海洋と海洋（u=1 なら自分が上）
-  }
+  // 境界ごとの効果はプレートノードが組ごとに計算して渡す。ここでは高さに直すだけ。
+  // 陸らしさ L: 陸になっている所（巨大大陸に持ち上げられた海洋プレートも）では、海溝や島弧ではなく山脈と地溝にする
+  const L=lib.smooth(-.08,.04,inp.s),noi=.55+.45*lib.noise(x/60,y/60,seed);
+  const s=inp.s+L*(.25*inp.cc-p.rift*inp.ccRift)+(1-L)*(inp.oS-p.rift*inp.oRift);
+  const mtn=L*inp.cc+(1-L)*inp.oMtn;
+  const add=(1-L)*(p.arc*inp.arc*noi-p.trench*inp.trench+p.ridge*inp.ridge-500*inp.axis);
   return {s:s,add:add,mtn:mtn};
  }},
 profile:{name:"断面（大陸棚→斜面→深海）",ins:["s"],outs:["e"],
@@ -484,8 +494,8 @@ function defaultGraph(){
   const n={mega:mkNode("mega",20,300,4242),plates:mkNode("plates",20,40,1469),shape:mkNode("shape",250,20,2071),boundary:mkNode("boundary",480,60,333),
     profile:mkNode("profile",710,20,0),add:mkNode("add",710,190,0),mountains:mkNode("mountains",940,60,808),
     seamounts:mkNode("seamounts",940,230,512),detail:mkNode("detail",1170,60,97),rivers:mkNode("rivers",1400,60,0),output:mkNode("output",1170,280,0)};
-  const W=[["mega","mega","shape","mega"],["plates","bias","shape","bias"],["shape","s","boundary","s"],["plates","bd","boundary","bd"],["plates","closing","boundary","closing"],
-    ["plates","cont","boundary","cont"],["plates","other","boundary","other"],["plates","upper","boundary","upper"],
+  const W=[["mega","mega","shape","mega"],["plates","bias","shape","bias"],["shape","s","boundary","s"],
+    ...["cc","ccRift","oS","oRift","oMtn","trench","arc","ridge","axis"].map(k=>["plates",k,"boundary",k]),
     ["boundary","s","profile","s"],["profile","e","add","a"],["boundary","add","add","b"],
     ["add","e","mountains","e"],["boundary","mtn","mountains","mtn"],["mountains","e","seamounts","e"],
     ["seamounts","e","detail","e"],["boundary","s","detail","s"],["detail","e","rivers","e"],["rivers","e","output","e"],["rivers","river","output","river"],["rivers","lake","output","lake"],
@@ -496,10 +506,19 @@ function save(){try{localStorage.setItem("sf-terrain-graph-v3",JSON.stringify({g
 function load(){try{const s=JSON.parse(localStorage.getItem("sf-terrain-graph-v3")||"null");if(s&&s.g&&s.g.nodes){uid=s.uid||100;return s.g;}}catch(e){}return null;}
 G2=load()||(()=>{const g=defaultGraph();G2=g;autoLayout();return g;})();
 // built-in code from an older version of this page is brought up to date; code someone edited is left alone
-const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["if(d<d1){d2=d1;bx=ax;by=ay;"],boundary:["if(inp.cont&&inp.other){"],profile:["if(s>=0) e=5+p.landH"]};
+const OLD_CODE={rivers:["wet=i=>H[i]>=0&&h[i]-H[i]>1&&e[i]>=h[i]-.5;"],plates:["if(d<d1){d2=d1;bx=ax;by=ay;","seed+1,3,.5)*p.warp","const dk=(d-d1)/(2*nl)*ps;"],boundary:["if(inp.cont&&inp.other){","w=o;s+=w*(.25*conv*g(0,350)","const bd=inp.bd,conv=Math.max(0,inp.closing)"],profile:["if(s>=0) e=5+p.landH"]};
 function upgradeGraph(g){g.nodes.forEach(n=>{
   if(n.type==="output")["river","lake"].forEach(k=>{if(!n.ins.includes(k))n.ins.push(k);});
-  if(OLD_CODE[n.type]&&TYPES[n.type]&&OLD_CODE[n.type].some(f=>n.code&&n.code.includes(f))) n.code=TYPES[n.type].fn.toString();});}
+  if(OLD_CODE[n.type]&&TYPES[n.type]&&OLD_CODE[n.type].some(f=>n.code&&n.code.includes(f))){
+    const T=TYPES[n.type];n.code=T.fn.toString();
+    // ports changed with the code: keep wires on ports that still exist, and wire the new boundary inputs from the plates node that fed the old ones
+    if(n.type==="plates") n.outs=T.outs.slice();
+    if(n.type==="boundary"){const old=g.wires.filter(w=>w.to===n.id),src=old.find(w=>["bd","closing","cont","other","upper"].includes(w.tp));
+      n.ins=T.ins.slice();g.wires=g.wires.filter(w=>w.to!==n.id||n.ins.includes(w.tp));
+      if(src) for(const k of T.ins) if(k!=="s"&&!g.wires.some(w=>w.to===n.id&&w.tp===k)) g.wires.push({from:src.from,fp:k,to:n.id,tp:k});}
+  }});
+  // a plates node brought up to date needs its new outputs even if the boundary node was upgraded first
+  g.nodes.forEach(n=>{if(n.type==="plates"&&n.code===TYPES.plates.fn.toString()) n.outs=TYPES.plates.outs.slice();});}
 upgradeGraph(G2);
 
 /*CORE2*/
