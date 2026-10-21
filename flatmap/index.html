@@ -316,7 +316,24 @@ function drawLines(ctx,E,M,N2,landStep,toX,toY,lw,LK,waves){
   if(LK){const LD=new Float32Array(E.length);for(let k=0;k<E.length;k++) LD[k]=LK[k]===LK[k]?LK[k]-E[k]:-1;iso(LD,0,"rgba(61,43,28,.8)",1);}
 }
 // rivers as smoothed, tapered strokes; toS maps world metres to ctx pixels, pxPerM scales the width
-function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff){
+function heightInTile(E,TT,ii,jj,X,Y){
+  const N=S.N,SK=S.SK,M=N+2*SK,s=TT/N,gx=(X-ii*TT)/s+SK-.5,gy=((jj+1)*TT-Y)/s+SK-.5;
+  const x0=clamp(Math.floor(gx),0,M-2),y0=clamp(Math.floor(gy),0,M-2),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),k=y0*M+x0;
+  return (E[k]*(1-fx)+E[k+1]*fx)*(1-fy)+(E[k+M]*(1-fx)+E[k+M+1]*fx)*fy;
+}
+function clipToLand(pts,hAt,step){
+  // the rivers come from the coarse grid; cut them where the fine terrain is sea, so no stream runs over a bay or past the real coast
+  const out=[];let cur=[];
+  const flush=()=>{if(cur.length>=2) out.push(cur);cur=[];};
+  let ph=hAt(pts[0][0],pts[0][1]);if(ph>=0||ph!==ph) cur.push(pts[0]);
+  for(let k=1;k<pts.length;k++){const a=pts[k-1],b=pts[k],L=Math.hypot(b[0]-a[0],b[1]-a[1]),m=Math.max(1,Math.min(32,Math.ceil(L/step)));
+    for(let t=1;t<=m;t++){const f=t/m,x=a[0]+(b[0]-a[0])*f,y=a[1]+(b[1]-a[1])*f,acc=a[2]+(b[2]-a[2])*f;let h=hAt(x,y);if(h!==h) h=ph;
+      if(h>=0){if(ph<0){const px=x-(b[0]-a[0])/m,py=y-(b[1]-a[1])/m,g=ph/(ph-h);cur.push([px+(x-px)*g,py+(y-py)*g,acc]);}cur.push([x,y,acc]);}
+      else if(ph>=0){const px=x-(b[0]-a[0])/m,py=y-(b[1]-a[1])/m,g=ph/(ph-h);cur.push([px+(x-px)*g,py+(y-py)*g,acc]);flush();}
+      ph=h;}}
+  flush();return out;
+}
+function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff,hAt){
   if(!HY||!layers.lRiver) return;const P=HY.pts;ctx.strokeStyle="#3f6b7a";ctx.lineCap="round";ctx.lineJoin="round";
   const wOf=a=>clamp(clamp(.4+.9*Math.log10(1+a/40),.5,2.6)*Math.pow(1.3,Math.max(0,zEff-5)),.5,10);
   const minAcc=40*Math.pow(2,Math.max(0,5-zEff));
@@ -325,13 +342,15 @@ function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff){
     for(let p=rv.st,k=0;p<rv.en;p+=3,k++){let x=P[p],y=P[p+1];
       if(k>0&&p+3<rv.en){const dx=P[p+3]-P[p-3],dy=P[p+4]-P[p-2],l=Math.hypot(dx,dy)||1,j=(rnd(k,rv.id,S.seed)-.5)*.5*HY.C;x+=-dy/l*j;y+=dx/l*j;}   // a little deterministic meander hides the coarse grid
       pts.push([x,y,P[p+2]]);}
+    const pieces=hAt?clipToLand(pts,hAt,Math.max(HY.C/16,2/pxPerM)):[pts];
+    for(const pts of pieces){prev=null;prevW=0;
     for(let k=0;k<pts.length;k++){const q=pts[k],[sx,sy]=toS(q[0],q[1]),w=wOf(q[2]);
       if(prev&&Math.abs(sx-prev[0])+Math.abs(sy-prev[1])>2500){prev=[sx,sy,sx,sy];prevW=w;continue;}   // a stream crossing the seam of the chart
       if(prev){const mxp=(prev[0]+sx)/2,myp=(prev[1]+sy)/2;ctx.lineWidth=(prevW+w)/2;ctx.beginPath();
         if(k>=2){const pp=prev;ctx.moveTo(pp[2],pp[3]);ctx.quadraticCurveTo(pp[0],pp[1],mxp,myp);}else{ctx.moveTo(prev[0],prev[1]);ctx.lineTo(mxp,myp);}
         ctx.stroke();prev=[sx,sy,mxp,myp];}
       else prev=[sx,sy,sx,sy];prevW=w;}
-    if(prev){ctx.lineWidth=prevW;ctx.beginPath();ctx.moveTo(prev[2],prev[3]);ctx.lineTo(prev[0],prev[1]);ctx.stroke();}}
+    if(prev){ctx.lineWidth=prevW;ctx.beginPath();ctx.moveTo(prev[2],prev[3]);ctx.lineTo(prev[0],prev[1]);ctx.stroke();}}}
 }
 function paintTile(rec){
   const N=S.N,SK=S.SK,M=N+2*SK,T=tileSize(rec.z),sp=T/N,cv=document.createElement("canvas");cv.width=cv.height=N;
@@ -340,7 +359,7 @@ function paintTile(rec){
   if(HY&&layers.lRiver){LK=new Float32Array(M*M);for(let r=0;r<M;r++){const Y=(rec.j+1)*T-(r-SK+.5)*sp;for(let cc=0;cc<M;cc++) LK[r*M+cc]=lakeLevelAt(rec.i*T+(cc-SK+.5)*sp,Y);}}
   shadeInto(img,rec.E,M,M,SK,()=>sp,LK?(r,cc)=>LK[r*M+cc]:null);c.putImageData(img,0,0);
   const toS=(X,Y)=>[(X-rec.i*T)/sp,((rec.j+1)*T-Y)/sp];
-  drawRivers(c,rec.i*T-T*.05,rec.j*T-T*.05,(rec.i+1)*T+T*.05,(rec.j+1)*T+T*.05,toS,1/sp,rec.z);
+  drawRivers(c,rec.i*T-T*.05,rec.j*T-T*.05,(rec.i+1)*T+T*.05,(rec.j+1)*T+T*.05,toS,1/sp,rec.z,(X,Y)=>heightInTile(rec.E,T,rec.i,rec.j,X,Y));
   drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-SK,y=>y-SK,1,LK,1);
   return cv;
 }
@@ -376,9 +395,7 @@ function sampleHeight(X,Y,mLocal){
     if(!E){for(let k=1;k<=4&&z-k>=0;k++){const f=1<<k,a=store.get((z-k)+"/"+Math.floor(i/f)+"/"+Math.floor(j/f));if(a&&a.E){E=a.E;zz=z-k;ii=Math.floor(i/f);jj=Math.floor(j/f);TT=tileSize(zz);break;}}}
     if(!E) return NaN;
     lastTile.z=z;lastTile.i=i;lastTile.j=j;lastTile.E=E;lastTile.zz=zz;lastTile.ii=ii;lastTile.jj=jj;lastTile.TT=TT;}
-  const N=S.N,SK=S.SK,M=N+2*SK,s=TT/N,gx=(X-ii*TT)/s+SK-.5,gy=((jj+1)*TT-Y)/s+SK-.5;
-  const x0=clamp(Math.floor(gx),0,M-2),y0=clamp(Math.floor(gy),0,M-2),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),k=y0*M+x0;
-  return (E[k]*(1-fx)+E[k+1]*fx)*(1-fy)+(E[k+M]*(1-fx)+E[k+M+1]*fx)*fy;
+  return heightInTile(E,TT,ii,jj,X,Y);
 }
 const projC=document.createElement("canvas");
 function drawProjected(ctx,W,H,inv,fwd){
@@ -397,7 +414,7 @@ function drawProjected(ctx,W,H,inv,fwd){
   const zEff=clamp(Math.round(Math.log2(32768/mm)),0,S.finest);
   if(HY){const c0=inv(0,0),c1=inv(W,H),c2=inv(0,H),c3=inv(W,0),xs=[c0,c1,c2,c3].filter(Boolean);
     const big=xs.length<4||view.mode==="disc";const x0=big?-1e9:Math.min(...xs.map(p=>p[0])),x1=big?1e9:Math.max(...xs.map(p=>p[0])),y0=big?-1e9:Math.min(...xs.map(p=>p[1])),y1=big?1e9:Math.max(...xs.map(p=>p[1]));
-    drawRivers(ctx,x0,y0,x1,y1,(X,Y)=>fwd(X,Y)||[-1e4,-1e4],1/mm,zEff);}
+    drawRivers(ctx,x0,y0,x1,y1,(X,Y)=>fwd(X,Y)||[-1e4,-1e4],1/mm,zEff,(X,Y)=>sampleHeight(X,Y,mm));}
   drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1,LK,null);
   return {z:zEff,shown:0,missing};
 }
