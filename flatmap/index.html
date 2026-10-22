@@ -347,6 +347,13 @@ function heightInTile(E,TT,ii,jj,X,Y){
   const x0=clamp(Math.floor(gx),0,M-2),y0=clamp(Math.floor(gy),0,M-2),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),k=y0*M+x0;
   return (E[k]*(1-fx)+E[k+1]*fx)*(1-fy)+(E[k+M]*(1-fx)+E[k+M+1]*fx)*fy;
 }
+// after the rivers are drawn, the water is laid back on top: a stroke's width, its round end or a smoothed bend can never show over a lake or the sea
+function coverWater(ctx,img,E,M,N2,SK,lakeAt){
+  const W=M-2*SK,Hh=N2-2*SK,ov=ctx.createImageData(W,Hh),od=ov.data,id=img.data;let any=false;
+  for(let r=SK;r<N2-SK;r++)for(let c=SK;c<M-SK;c++){const k=r*M+c,e=E[k];if(!(e===e)) continue;const lk=lakeAt?lakeAt(r,c):NaN;
+    if(e<0||(lk===lk&&lk>e)){const o=((r-SK)*W+(c-SK))*4;od[o]=id[o];od[o+1]=id[o+1];od[o+2]=id[o+2];od[o+3]=255;any=true;}}
+  if(!any) return;const oc=document.createElement("canvas");oc.width=W;oc.height=Hh;oc.getContext("2d").putImageData(ov,0,0);return oc;
+}
 function dryAt(hAt){return (X,Y)=>{const h=hAt(X,Y);const lk=lakeLevelAt(X,Y);return (lk===lk&&lk>h)?-1:h;};}   // a lake counts as water too
 function clipToLand(pts,hAt,step){
   // the rivers come from the coarse grid; cut them where the fine terrain is sea, so no stream runs over a bay or past the real coast
@@ -393,6 +400,7 @@ function paintTile(rec){
   shadeInto(img,rec.E,M,M,SK,()=>sp,LK?(r,cc)=>LK[r*M+cc]:null);c.putImageData(img,0,0);
   const toS=(X,Y)=>[(X-rec.i*T)/sp,((rec.j+1)*T-Y)/sp];
   drawRivers(c,rec.i*T-T*.05,rec.j*T-T*.05,(rec.i+1)*T+T*.05,(rec.j+1)*T+T*.05,toS,1/sp,rec.z,(X,Y)=>heightInTile(rec.E,T,rec.i,rec.j,X,Y));
+  if(HY&&layers.lRiver){const oc=coverWater(c,img,rec.E,M,M,SK,LK?(r,cc)=>LK[r*M+cc]:null);if(oc) c.drawImage(oc,0,0);}
   drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-SK,y=>y-SK,1,LK,1);
   return cv;
 }
@@ -452,7 +460,8 @@ function drawProjected(ctx,W,H,inv,fwd){
   const zEff=clamp(Math.round(Math.log2(32768/mm)),0,S.finest);
   if(HY){const c0=inv(0,0),c1=inv(W,H),c2=inv(0,H),c3=inv(W,0),xs=[c0,c1,c2,c3].filter(Boolean);
     const big=xs.length<4||view.mode==="disc";const x0=big?-1e9:Math.min(...xs.map(p=>p[0])),x1=big?1e9:Math.max(...xs.map(p=>p[0])),y0=big?-1e9:Math.min(...xs.map(p=>p[1])),y1=big?1e9:Math.max(...xs.map(p=>p[1]));
-    drawRivers(ctx,x0,y0,x1,y1,(X,Y)=>fwd(X,Y)||[-1e4,-1e4],1/mm,zEff,(X,Y)=>sampleHeight(X,Y,mm));}
+    drawRivers(ctx,x0,y0,x1,y1,(X,Y)=>fwd(X,Y)||[-1e4,-1e4],1/mm,zEff,(X,Y)=>sampleHeight(X,Y,mm));
+    const oc=coverWater(pc,img,E,M,Hg,1,LK?(r,c)=>LK[r*Wg+c]:null);if(oc) ctx.drawImage(oc,0,0,W,H);}
   drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1,LK,null);
   return {z:zEff,shown:0,missing};
 }
