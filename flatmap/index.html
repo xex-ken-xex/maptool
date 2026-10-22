@@ -365,9 +365,15 @@ function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff,hAt){
   const minAcc=40*Math.pow(2,Math.max(0,5-zEff));
   for(const rv of HY.rivers){const bb=rv.bb;if(rv.mx<minAcc||bb[2]<x0||bb[0]>x1||bb[3]<y0||bb[1]>y1) continue;
     let prev=null,prevW=0;const pts=[];
-    for(let p=rv.st,k=0;p<rv.en;p+=3,k++){let x=P[p],y=P[p+1];
-      if(k>0&&p+3<rv.en){const dx=P[p+3]-P[p-3],dy=P[p+4]-P[p-2],l=Math.hypot(dx,dy)||1,j=(rnd(k,rv.id,S.seed)-.5)*.5*HY.C;x+=-dy/l*j;y+=dx/l*j;}   // a little deterministic meander hides the coarse grid
+    const C=HY.C;
+    for(let p=rv.st;p<rv.en;p+=3){let x=P[p],y=P[p+1];
+      // a little deterministic shift per grid cell hides the coarse grid; it depends on the place only, so a tributary meets its river exactly
+      const cx=Math.round(x/C),cy=Math.round(y/C);x+=(rnd(cx,cy,S.seed+31)-.5)*.5*C;y+=(rnd(cx,cy,S.seed+32)-.5)*.5*C;
       pts.push([x,y,P[p+2]]);}
+    // close up, the 4 km legs get a gentle meander between the grid points (zero at the points, so junctions stay closed)
+    if(C*pxPerM>40){const fine=[];for(let k=0;k<pts.length;k++){const a=pts[k];if(k===0){fine.push(a);continue;}const b=pts[k-1],dx=a[0]-b[0],dy=a[1]-b[1],L=Math.hypot(dx,dy)||1,n=Math.min(16,Math.max(2,Math.round(L*pxPerM/10)));
+        for(let t=1;t<=n;t++){const f=t/n,x=b[0]+dx*f,y=b[1]+dy*f,w=Math.sin(Math.PI*f)*C*.3*fbm(x/1800,y/1800,S.seed+21,3,.5);fine.push([x-dy/L*w,y+dx/L*w,b[2]+(a[2]-b[2])*f]);}}
+      pts.length=0;for(const q of fine) pts.push(q);}
     const pieces=hAt?clipToLand(pts,hAt,Math.max(HY.C/16,2/pxPerM)):[pts];
     for(const pts of pieces){prev=null;prevW=0;
     for(let k=0;k<pts.length;k++){const q=pts[k],[sx,sy]=toS(q[0],q[1]),w=wOf(q[2]);
