@@ -49,7 +49,7 @@ input[type=range]{width:90px}
     <button id="mDisc" title="無限の平面を一枚の円に。縁が無限遠">全体図（円盤）</button>
     <button id="m3d" title="同じ区画を立体に。回転と俯角はこの表示だけ">立体</button>
   </span>
-  <button id="northUp" hidden title="回転を戻して北を上に">北を上に</button>
+  <span id="ctl3d" hidden><label>回転 <input type="range" id="rotR" min="-180" max="180" value="0" style="width:7em"></label><label>俯角 <input type="range" id="pitchR" min="0" max="72" value="54" style="width:6em"></label><button id="northUp" title="回転を戻して北を上に">北を上に</button></span>
   <label class="more">seed <input type="number" id="seed" value="7"></label>
   <button class="more" id="reseed">乱数</button>
   <label class="more">最細レベル <input type="number" id="finest" min="6" max="12" value="10" style="width:4em"></label>
@@ -64,7 +64,7 @@ input[type=range]{width:90px}
   <button class="more" id="home">中心へ</button>
   <label class="btnlike more" title="地形工房の「区画データを書き出す」で作った zip（中は world.sfw）">世界を読み込む<input type="file" id="worldFile" accept=".sfw,.zip" hidden></label>
   <button class="more" id="worldOff" hidden>仮の世界に戻す</button>
-  <span class="hint">ドラッグで移動、ホイールで拡大、立体では右ドラッグか Shift+ドラッグで回転と俯角（二本指でも）、F2 でデバッグ表示</span>
+  <span class="hint">ドラッグで移動、ホイールで拡大、立体では右ドラッグ・Shift+ドラッグ・コンパスのドラッグで回転と俯角（二本指でも、スライダーでも）、F2 でデバッグ表示</span>
 </header>
 <div id="box">
   <canvas id="gl" hidden></canvas>
@@ -652,7 +652,7 @@ function render(){
   else if(view.mode==="disc") stats=drawProjected(ctx,W,H,discInv(W,H),(X,Y)=>discFwd(W,H,X,Y));
   else stats=drawProjected(ctx,W,H,logInv(W,H),(X,Y)=>logFwd(W,H,X,Y));
   stats.ms=performance.now()-t0;
-  drawOverlay(ctx,W,H);drawLabels(ctx,W,H);trimStore();updateHud();
+  drawOverlay(ctx,W,H);drawLabels(ctx,W,H);trimStore();updateHud();if(view.mode==="3d") sync3dCtl();
 }
 
 /* ---------- readout: where the cursor is, in every coordinate system of the design ---------- */
@@ -687,10 +687,10 @@ function updateHud(){
 let drag=null;
 box.addEventListener("contextmenu",ev=>ev.preventDefault());
 box.addEventListener("pointerdown",ev=>{if(ev.button!==0&&ev.button!==2&&ev.pointerType==="mouse") return;box.setPointerCapture(ev.pointerId);
-  const r=box.getBoundingClientRect(),rot=view.mode==="3d"&&(ev.button===2||ev.shiftKey);
+  const r=box.getBoundingClientRect(),onRose=view.mode==="3d"&&Math.hypot(ev.clientX-r.left-(r.width-34),ev.clientY-r.top-64)<26,rot=view.mode==="3d"&&(ev.button===2||ev.shiftKey||ev.ctrlKey||ev.altKey||onRose);
   drag={x:ev.clientX,y:ev.clientY,rot,g:view.mode==="3d"&&!rot?cam3d(r.width,r.height).ground(ev.clientX-r.left,ev.clientY-r.top):null};box.classList.add("drag");});
 box.addEventListener("pointermove",ev=>{const r=box.getBoundingClientRect();cursor=[ev.clientX-r.left,ev.clientY-r.top];
-  if(drag){const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;drag={x:ev.clientX,y:ev.clientY};
+  if(drag){const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;drag.x=ev.clientX;drag.y=ev.clientY;
     if(view.mode==="plane"){const m=mpp();view.x-=dx*m;view.y+=dy*m;}
     else if(view.mode==="3d"){
       if(drag.rot){view.rot=(view.rot+dx*.005)%(2*Math.PI);view.pitch=clamp(view.pitch-dy*.005,0,1.25);}
@@ -727,8 +727,11 @@ function syncModes(from,to){const W=box.clientWidth;
   if(from==="log"&&to==="plane"){const r=S.litR*Math.exp(view.lv);view.x=r*Math.sin(view.lu);view.y=r*Math.cos(view.lu);view.zoom=clamp(Math.log2(32768/(r/logPPR(W))),-3,S.finest+1);}
 }
 function setMode(m){if(m==="3d"&&view.mode==="log"){syncModes("log","plane");view.mode="plane";}if(view.mode==="3d"&&m==="log"){syncModes("plane","log");}else syncModes(view.mode,m);
-  view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"],["m3d","3d"]]) $(id).classList.toggle("on",k===m);glC.hidden=m!=="3d";$("northUp").hidden=m!=="3d";schedule();saveView();}
-$("mPlane").onclick=()=>setMode("plane");$("m3d").onclick=()=>setMode("3d");$("northUp").onclick=()=>{view.rot=0;schedule();saveView();};$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
+  view.mode=m;for(const [id,k] of [["mPlane","plane"],["mLog","log"],["mDisc","disc"],["m3d","3d"]]) $(id).classList.toggle("on",k===m);glC.hidden=m!=="3d";$("ctl3d").hidden=m!=="3d";sync3dCtl();schedule();saveView();}
+function sync3dCtl(){let d=view.rot*180/Math.PI;d=((d+180)%360+360)%360-180;$("rotR").value=Math.round(d);$("pitchR").value=Math.round(view.pitch*180/Math.PI);}
+$("rotR").oninput=()=>{view.rot=+$("rotR").value*Math.PI/180;schedule();saveView();};
+$("pitchR").oninput=()=>{view.pitch=+$("pitchR").value*Math.PI/180;schedule();saveView();};
+$("mPlane").onclick=()=>setMode("plane");$("m3d").onclick=()=>setMode("3d");$("northUp").onclick=()=>{view.rot=0;sync3dCtl();schedule();saveView();};$("mLog").onclick=()=>setMode("log");$("mDisc").onclick=()=>setMode("disc");
 $("gear").onclick=()=>{document.querySelector("header").classList.toggle("open");setTimeout(()=>schedule(),0);};
 $("home").onclick=()=>{view.x=0;view.y=0;view.zoom=1.2;view.lu=0;view.lv=0;view.lz=0;schedule();saveView();};
 /* ---------- an imported world: the .sfw file from 地形工房 (magic, header length, JSON header, Int16 heights) ---------- */
