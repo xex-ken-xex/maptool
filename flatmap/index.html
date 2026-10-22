@@ -243,9 +243,9 @@ function tileGet(z,i,j,pri){
   return rec;
 }
 function trimStore(){
-  if(store.size<=300) return;
+  const need=Math.max(300,((stats.leaves||0)+(stats.shown||0))*2+60);if(store.size<=need) return;
   const recs=[...store.values()].filter(r=>!r.pending||r.E).sort((a,b)=>a.last-b.last);
-  for(let k=0;k<recs.length-220;k++){freeGL(recs[k]);store.delete(recs[k].key);}lastTile.E=null;
+  for(let k=0;k<recs.length-Math.round(need*.75);k++){freeGL(recs[k]);store.delete(recs[k].key);}lastTile.E=null;
 }
 
 /* ---------- hydrology: a coarse grid of the lit world, made in bands by the pool, analysed by one worker ---------- */
@@ -472,7 +472,7 @@ function drawOverlay(ctx,W,H){
   if(layers.lLit){ctx.strokeStyle="#3d2b1c";ctx.lineWidth=1.4;ctx.setLineDash([6,5]);ctx.beginPath();
     if(view.mode==="plane"){const m=mpp(),[ox,oy]=toScreen(W,H,0,0),R=S.litR/m;if(R<4e4) ctx.arc(ox,oy,R,0,6.2832);}
     else if(view.mode==="3d"){const c=cam3d(W,H);let pen=false;for(let d=0;d<=360;d+=1){const a=d*Math.PI/180,p=c.project(S.litR*Math.sin(a),S.litR*Math.cos(a),0);
-      if(!p||Math.abs(p[0])>8*W||Math.abs(p[1])>8*H){pen=false;continue;}if(pen) ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);pen=true;}}
+      if(!p||p[2]*c.f>12*c.D||Math.abs(p[0])>8*W||Math.abs(p[1])>8*H){pen=false;continue;}if(pen) ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);pen=true;}}
     else if(view.mode==="disc"){const {cx,cy,Rm}=discParams(W,H);ctx.arc(cx,cy,Rm/2,0,6.2832);ctx.moveTo(cx+Rm,cy);ctx.arc(cx,cy,Rm,0,6.2832);}
     else{const p=logFwd(W,H,S.litR,0);if(p){ctx.moveTo(0,p[1]);ctx.lineTo(W,p[1]);}}
     ctx.stroke();ctx.setLineDash([]);}
@@ -536,7 +536,7 @@ function meshFor(rec,src){   // vertices of this tile from the heights of src (i
   for(let c=0;c<V;c++) put(c*s,0);for(let c=0;c<V;c++) put(c*s,T);for(let r=0;r<V;r++) put(0,r*s);for(let r=0;r<V;r++) put(T,r*s);
   return out;
 }
-function bestSource(rec){if(rec.E) return rec;for(let k=1;k<=6&&rec.z-k>=0;k++){const f=1<<k,a=store.get((rec.z-k)+"/"+Math.floor(rec.i/f)+"/"+Math.floor(rec.j/f));if(a&&a.E){a.last=++tick;return a;}}return null;}
+function bestSource(rec){if(rec.E){rec.last=++tick;return rec;}for(let k=1;k<=6&&rec.z-k>=0;k++){const f=1<<k,a=store.get((rec.z-k)+"/"+Math.floor(rec.i/f)+"/"+Math.floor(rec.j/f));if(a&&a.E){a.last=++tick;return a;}}return null;}
 function select3d(c){   // leaf tiles for this camera: subdivide while a tile would be big on screen
   const zmax=clamp(Math.round(view.zoom-.6*Math.sin(view.pitch)),0,S.finest),W=c.W,H=c.H;
   // ground footprint of the screen, far rays capped
@@ -545,12 +545,14 @@ function select3d(c){   // leaf tiles for this camera: subdivide while a tile wo
     if(g&&Math.hypot(g[0]-c.cam[0],g[1]-c.cam[1])<far){X=g[0];Y=g[1];}else{const dx=sx-W/2,dy=-(sy-H/2),d=[c.rt[0]*dx+c.up[0]*dy+c.fw[0]*c.f,c.rt[1]*dx+c.up[1]*dy+c.fw[1]*c.f];const L=Math.hypot(d[0],d[1])||1;X=c.cam[0]+d[0]/L*far;Y=c.cam[1]+d[1]/L*far;}
     if(X<x0)x0=X;if(X>x1)x1=X;if(Y<y0)y0=Y;if(Y>y1)y1=Y;}
   let z0=Math.max(0,zmax-6);while(z0>0&&((x1-x0)/tileSize(z0)+1)*((y1-y0)/tileSize(z0)+1)>200) z0--;
-  const leaves=[];let budget=600;
+  let leaves=[],thr=400;
   const visit=(z,i,j)=>{const T=tileSize(z),cx=(i+.5)*T,cy=(j+.5)*T;if(cx+T<x0||cx-T>x1||cy+T<y0||cy-T>y1) return;
     const d=Math.max(c.near,Math.hypot(cx-c.cam[0],cy-c.cam[1],c.cam[2])-T*.7),px=T*c.f/d;
-    if(z<zmax&&px>400&&budget>0){budget--;visit(z+1,2*i,2*j);visit(z+1,2*i+1,2*j);visit(z+1,2*i,2*j+1);visit(z+1,2*i+1,2*j+1);}
+    if(z<zmax&&px>thr){visit(z+1,2*i,2*j);visit(z+1,2*i+1,2*j);visit(z+1,2*i,2*j+1);visit(z+1,2*i+1,2*j+1);}
     else leaves.push([z,i,j,d]);};
-  const T0=tileSize(z0);for(let j=Math.floor(y0/T0);j<=Math.floor(y1/T0);j++)for(let i=Math.floor(x0/T0);i<=Math.floor(x1/T0);i++) visit(z0,i,j);
+  const T0=tileSize(z0),roots=[];for(let j=Math.floor(y0/T0);j<=Math.floor(y1/T0);j++)for(let i=Math.floor(x0/T0);i<=Math.floor(x1/T0);i++) roots.push([i,j]);
+  // coarser on-screen size until the count stays modest, so the cache never churns
+  for(let k=0;k<6;k++){leaves=[];for(const [i,j] of roots) visit(z0,i,j);if(leaves.length<=160) break;thr*=1.5;}
   return {leaves,zmax};
 }
 function draw3d(W,H,dpr){
