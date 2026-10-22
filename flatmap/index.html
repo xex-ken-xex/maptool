@@ -347,6 +347,7 @@ function heightInTile(E,TT,ii,jj,X,Y){
   const x0=clamp(Math.floor(gx),0,M-2),y0=clamp(Math.floor(gy),0,M-2),fx=clamp(gx-x0,0,1),fy=clamp(gy-y0,0,1),k=y0*M+x0;
   return (E[k]*(1-fx)+E[k+1]*fx)*(1-fy)+(E[k+M]*(1-fx)+E[k+M+1]*fx)*fy;
 }
+function dryAt(hAt){return (X,Y)=>{const h=hAt(X,Y);const lk=lakeLevelAt(X,Y);return (lk===lk&&lk>h)?-1:h;};}   // a lake counts as water too
 function clipToLand(pts,hAt,step){
   // the rivers come from the coarse grid; cut them where the fine terrain is sea, so no stream runs over a bay or past the real coast
   const out=[];let cur=[];
@@ -374,7 +375,7 @@ function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff,hAt){
     if(C*pxPerM>40){const fine=[];for(let k=0;k<pts.length;k++){const a=pts[k];if(k===0){fine.push(a);continue;}const b=pts[k-1],dx=a[0]-b[0],dy=a[1]-b[1],L=Math.hypot(dx,dy)||1,n=Math.min(16,Math.max(2,Math.round(L*pxPerM/10)));
         for(let t=1;t<=n;t++){const f=t/n,x=b[0]+dx*f,y=b[1]+dy*f,w=Math.sin(Math.PI*f)*C*.3*fbm(x/1800,y/1800,S.seed+21,3,.5);fine.push([x-dy/L*w,y+dx/L*w,b[2]+(a[2]-b[2])*f]);}}
       pts.length=0;for(const q of fine) pts.push(q);}
-    const pieces=hAt?clipToLand(pts,hAt,Math.max(HY.C/16,2/pxPerM)):[pts];
+    const pieces=hAt?clipToLand(pts,dryAt(hAt),Math.max(HY.C/16,2/pxPerM)):[pts];
     for(const pts of pieces){prev=null;prevW=0;
     for(let k=0;k<pts.length;k++){const q=pts[k],[sx,sy]=toS(q[0],q[1]),w=wOf(q[2]);
       if(prev&&Math.abs(sx-prev[0])+Math.abs(sy-prev[1])>2500){prev=[sx,sy,sx,sy];prevW=w;continue;}   // a stream crossing the seam of the chart
