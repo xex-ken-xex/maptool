@@ -78,14 +78,20 @@ input[type=range]{width:90px}
 const SRC=document.currentScript.textContent;
 /*GEN1*/
 /* ---------- noise toolbox (same as 地形工房) ---------- */
-const G=[[1,0],[-1,0],[0,1],[0,-1],[.7071,.7071],[-.7071,.7071],[.7071,-.7071],[-.7071,-.7071]];
 function ih(ix,iy,s){let h=Math.imul(ix|0,0x27d4eb2d)^Math.imul(iy|0,0x165667b1)^Math.imul(s|0,0x9e3779b1);h=Math.imul(h^(h>>>15),0x85ebca6b);h=Math.imul(h^(h>>>13),0xc2b2ae35);return (h^(h>>>16))>>>0;}
 function rnd(i,j,s){return ih(i,j,s)/4294967296;}
+// gradient noise from a lattice of 1024 x 1024 random directions (the seed slides the lattice); a table lookup per corner instead of a hash
+const PERM=new Uint16Array(2048),GX=new Float32Array(1024),GY=new Float32Array(1024);
+{const a=new Uint16Array(1024);for(let i=0;i<1024;i++) a[i]=i;for(let i=1023;i>0;i--){const j=ih(i,77,5)%(i+1),t=a[i];a[i]=a[j];a[j]=t;}
+ for(let i=0;i<2048;i++) PERM[i]=a[i&1023];for(let i=0;i<1024;i++){const th=rnd(i,3,9)*2*Math.PI;GX[i]=Math.cos(th);GY[i]=Math.sin(th);}}
 function noise(x,y,s){const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy;
   const u=fx*fx*fx*(fx*(fx*6-15)+10),v=fy*fy*fy*(fy*(fy*6-15)+10);
-  const g00=G[ih(ix,iy,s)&7],g10=G[ih(ix+1,iy,s)&7],g01=G[ih(ix,iy+1,s)&7],g11=G[ih(ix+1,iy+1,s)&7];
-  const n00=g00[0]*fx+g00[1]*fy,n10=g10[0]*(fx-1)+g10[1]*fy,n01=g01[0]*fx+g01[1]*(fy-1),n11=g11[0]*(fx-1)+g11[1]*(fy-1);
+  const X=(ix+s)&1023,Y=(iy+Math.imul(s,0x9e37))&1023,X1=(X+1)&1023,Y1=(Y+1)&1023;
+  const h00=PERM[PERM[X]+Y],h10=PERM[PERM[X1]+Y],h01=PERM[PERM[X]+Y1],h11=PERM[PERM[X1]+Y1];
+  const n00=GX[h00]*fx+GY[h00]*fy,n10=GX[h10]*(fx-1)+GY[h10]*fy,n01=GX[h01]*fx+GY[h01]*(fy-1),n11=GX[h11]*(fx-1)+GY[h11]*(fy-1);
   const a=n00+(n10-n00)*u,b=n01+(n11-n01)*u;return (a+(b-a)*v)*1.6;}
+// SPK: spacing of the samples being made (km); octaves finer than that are left out, they would only alias
+let SPK=0;const octFor=(sc,o)=>SPK>0?Math.max(1,Math.min(o,Math.floor(Math.log2(sc/SPK))+1)):o;
 function fbm(x,y,s,oct,gain){let sum=0,amp=1,f=1;for(let i=0;i<oct;i++){sum+=amp*noise(x*f+i*17.31,y*f-i*9.17,s+i*101);amp*=gain;f*=2;}return sum*0.6;}
 function ridged(x,y,s,oct){let sum=0,amp=1,f=1,norm=0;for(let i=0;i<oct;i++){const n=1-Math.abs(noise(x*f+i*7.7,y*f+i*3.1,s+i*131));sum+=amp*n*n;norm+=amp;amp*=.5;f*=2;}return sum/norm;}
 function smooth(a,b,v){let t=(v-a)/(b-a);t=t<0?0:t>1?1:t;return t*t*(3-2*t);}
@@ -93,7 +99,7 @@ function clamp(v,a,b){return v<a?a:v>b?b:v;}
 /* ---------- stand-in terrain: a fixed function of the world position, so every level samples the same ground ---------- */
 const LIT_KM=2200;
 let WORLD=null;   // an imported grid from 地形工房: {n,C,X0,Y0,G:Int16Array (0.25 m), litR}
-function worldHeight(X,Y,seed){
+function worldHeight(X,Y,seed){   // SPK (km per sample) is set by heightAt
   const w=WORLD,gx=(X-w.X0)/w.C-.5,gy=(w.Y0-Y)/w.C-.5,n=w.n;
   // the outermost 400 km of the grid blend into the stand-in generator, which alone makes the frontier beyond the grid
   const inside=Math.min(gx,n-1-gx,gy,n-1-gy)*w.C;if(inside<=0) return genHeight(X,Y,seed);const t=1-smooth(0,400e3,inside);
@@ -102,24 +108,24 @@ function worldHeight(X,Y,seed){
   if(t>0) h=h*(1-t)+genHeight(X,Y,seed)*t;
   // a little detail below the 2 km cell, fading out at the shore so the coast stays where the grid put it
   const x=X/1e3,y=Y/1e3,amp=h>=0?18*smooth(8,120,h):6*smooth(-8,-120,h);
-  if(amp>0) h+=fbm(x/3,y/3,seed+4,4,.5)*amp+fbm(x/.7,y/.7,seed+5,2,.5)*amp*.25;
+  if(amp>0) h+=fbm(x/3,y/3,seed+4,octFor(3,4),.5)*amp+(SPK<.7?fbm(x/.7,y/.7,seed+5,octFor(.7,2),.5)*amp*.25:0);
   return h;
 }
-function heightAt(X,Y,seed){return WORLD?worldHeight(X,Y,seed):genHeight(X,Y,seed);}
+function heightAt(X,Y,seed,sp){SPK=sp?sp/1e3:0;return WORLD?worldHeight(X,Y,seed):genHeight(X,Y,seed);}   // sp: metres between the samples being made (0 = every detail)
 function genHeight(X,Y,seed){            // X east, Y north in metres -> height in metres
   const x=X/1e3,y=Y/1e3,r=Math.hypot(x,y);
-  const wx=fbm(x/900,y/900,seed+1,4,.5)*260,wy=fbm(x/900+5.2,y/900+1.3,seed+2,4,.5)*260;
-  let s=fbm((x+wx)/1300,(y+wy)/1300,seed,8,.5);
+  const o9=octFor(900,4),wx=fbm(x/900,y/900,seed+1,o9,.5)*260,wy=fbm(x/900+5.2,y/900+1.3,seed+2,o9,.5)*260;
+  let s=fbm((x+wx)/1300,(y+wy)/1300,seed,octFor(1300,8),.5);
   s+=.16*smooth(LIT_KM*1.6,LIT_KM*.7,r)-.13;        // the lit world holds the continents; outside, a wide ocean with scattered frontier land
   let e;
-  if(s>=0){const m=ridged(x/260,y/260,seed+7,7);e=40+1900*s+2600*m*m*smooth(.04,.3,s);}
+  if(s>=0){const m=ridged(x/260,y/260,seed+7,octFor(260,7));e=40+1900*s+2600*m*m*smooth(.04,.3,s);}
   else if(s>=-.035) e=-140*(-s/.035);
   else if(s>=-.1) e=-140-3560*smooth(0,1,(-s-.035)/.065);
   else e=-3700-700*smooth(0,.25,-s-.1);
-  const d=fbm(x/45,y/45,seed+3,6,.5);
+  const d=fbm(x/45,y/45,seed+3,octFor(45,6),.5);
   e+=(s>=0?(d>0?d*(90+160*smooth(0,.25,s)):d*35):d*60);
-  e+=fbm(x/3,y/3,seed+4,4,.5)*(s>=0?14:6);
-  if(e<-2500){const sm=ridged(x/120,y/120,seed+11,4);e+=2200*Math.pow(Math.max(0,sm-.72)/.28,2);}
+  if(SPK<3) e+=fbm(x/3,y/3,seed+4,octFor(3,4),.5)*(s>=0?14:6);
+  if(e<-2500){const sm=ridged(x/120,y/120,seed+11,octFor(120,4));e+=2200*Math.pow(Math.max(0,sm-.72)/.28,2);}
   if(r>LIT_KM*1.3&&e>=0) e*=1+.6*smooth(LIT_KM*1.3,LIT_KM*3,r);   // the frontier is harsher: taller, colder land
   return e;
 }
@@ -155,10 +161,10 @@ function hydro(H,n,C,X0,Y0){
     lands.push({area:area*C*C,x:X0+(best%n+.5)*C,y:Y0-(((best/n)|0)+.5)*C,w:bd*C,id});}
   // lakes as components
   const lcomp=new Int32Array(N2).fill(-1),lakes=[];
-  for(let k=0;k<N2;k++){if(!(lake[k]===lake[k])||lcomp[k]>=0) continue;const id=lakes.length;let sp=0,area=0,sx=0,sy=0,depth=0;stack[sp++]=k;lcomp[k]=id;
-    while(sp>0){const m=stack[--sp];area++;sx+=m%n;sy+=(m/n)|0;if(F[m]-H[m]>depth) depth=F[m]-H[m];const r=(m/n)|0,c=m%n;
+  for(let k=0;k<N2;k++){if(!(lake[k]===lake[k])||lcomp[k]>=0) continue;const id=lakes.length;let sp=0,area=0,sx=0,sy=0,depth=0;stack[sp++]=k;lcomp[k]=id;const cells=[];
+    while(sp>0){const m=stack[--sp];cells.push(m);area++;sx+=m%n;sy+=(m/n)|0;if(F[m]-H[m]>depth) depth=F[m]-H[m];const r=(m/n)|0,c=m%n;
       const cand=[c>0?m-1:-1,c<n-1?m+1:-1,r>0?m-n:-1,r<n-1?m+n:-1];for(const q of cand) if(q>=0&&lake[q]===lake[q]&&lcomp[q]<0){lcomp[q]=id;stack[sp++]=q;}}
-    if(area<6||depth<30){for(let q=0;q<N2;q++) if(lcomp[q]===id){lake[q]=NaN;lcomp[q]=-2;}continue;}
+    if(area<6||depth<30){for(const q of cells){lake[q]=NaN;lcomp[q]=-2;}continue;}
     lakes.push({area:area*C*C,x:X0+(sx/area+.5)*C,y:Y0-(sy/area+.5)*C,id});}
   lakes.sort((a,b)=>b.area-a.area);if(lakes.length>400){const keep=new Set(lakes.slice(0,400).map(l=>l.id));for(let q=0;q<N2;q++) if(lcomp[q]>=0&&!keep.has(lcomp[q])) lake[q]=NaN;lakes.length=400;}
   // rivers: from each mouth upstream along the biggest feeder (the main stem), then the tributaries that join it
@@ -197,10 +203,10 @@ const WORKER_SRC=SRC.slice(SRC.indexOf("/*GEN1*/"),SRC.indexOf("/*GEN2*/"))+`
 onmessage=e=>{const m=e.data;
   if(m.kind==="world"){WORLD=m.world?{n:m.world.n,C:m.world.C,X0:m.world.X0,Y0:m.world.Y0,G:new Int16Array(m.world.buf)}:null;return;}
   if(m.kind==="tile"){const {id,z,i,j,N,SK,seed,T0}=m,T=T0/Math.pow(2,z),s=T/N,M=N+2*SK,E=new Float32Array(M*M);
-    for(let r=0;r<M;r++){const Y=(j+1)*T-(r-SK+.5)*s;for(let c=0;c<M;c++){E[r*M+c]=heightAt(i*T+(c-SK+.5)*s,Y,seed);}}
+    for(let r=0;r<M;r++){const Y=(j+1)*T-(r-SK+.5)*s;for(let c=0;c<M;c++){E[r*M+c]=heightAt(i*T+(c-SK+.5)*s,Y,seed,s);}}
     postMessage({kind:"tile",id,buf:E.buffer},[E.buffer]);}
   else if(m.kind==="band"){const {r0,r1,n,C,X0,Y0,seed}=m,out=new Float32Array((r1-r0)*n);
-    for(let r=r0;r<r1;r++){const Y=Y0-(r+.5)*C;for(let c=0;c<n;c++) out[(r-r0)*n+c]=heightAt(X0+(c+.5)*C,Y,seed);}
+    for(let r=r0;r<r1;r++){const Y=Y0-(r+.5)*C;for(let c=0;c<n;c++) out[(r-r0)*n+c]=heightAt(X0+(c+.5)*C,Y,seed,C);}
     postMessage({kind:"band",r0,seed,gen:m.gen,buf:out.buffer},[out.buffer]);}
   else if(m.kind==="hydro"){const {n,C,X0,Y0,seed}=m,H=new Float32Array(m.buf),t0=Date.now(),h=hydro(H,n,C,X0,Y0);
     postMessage({kind:"hydro",seed,gen:m.gen,n,C,X0,Y0,ms:Date.now()-t0,lake:h.lake.buffer,pts:h.pts.buffer,rivers:h.rivers,lands:h.lands,lakes:h.lakes,peaks:h.peaks},[h.lake.buffer,h.pts.buffer]);}
@@ -315,31 +321,40 @@ function shadeInto(img,E,M,N2,SK,spacing,lakeAt){
   }
 }
 // marching squares over the whole grid; seg(x1,y1,x2,y2) gets grid coordinates (cell centres at +.5)
-function isoSegs(E,M,N2,t,seg){
-  for(let r=0;r<N2-1;r++){let k=r*M,a0=E[k],d0=E[k+M];
-    for(let c=0;c<M-1;c++,k++){const a1=E[k+1],d1=E[k+M+1],A=a0>=t,B=a1>=t,D=d0>=t,F=d1>=t;
-      const ea=a0,eb=a1,ed=d0,ee=d1;a0=a1;d0=d1;
-      const code=(A?8:0)|(B?4:0)|(F?2:0)|(D?1:0);if(code===0||code===15||ea!==ea||eb!==eb||ed!==ed||ee!==ee) continue;
-      const Tx=c+(t-ea)/(eb-ea),Rz=r+(t-eb)/(ee-eb),Bx=c+(t-ed)/(ee-ed),Lz=r+(t-ea)/(ed-ea);
-      switch(code){
-        case 1:case 14:seg(c,Lz,Bx,r+1);break; case 2:case 13:seg(Bx,r+1,c+1,Rz);break;
-        case 3:case 12:seg(c,Lz,c+1,Rz);break; case 4:case 11:seg(Tx,r,c+1,Rz);break;
-        case 6:case 9:seg(Tx,r,Bx,r+1);break; case 7:case 8:seg(c,Lz,Tx,r);break;
-        case 5:seg(c,Lz,Tx,r);seg(Bx,r+1,c+1,Rz);break; case 10:seg(Tx,r,c+1,Rz);seg(c,Lz,Bx,r+1);break;}}}
+// all the levels of one grid in a single pass: each cell only looks at the levels between its lowest and highest corner; seg(levelIndex,x1,y1,x2,y2)
+function isoMany(E,M,N2,levels,seg,rect){
+  const L=levels.length;if(!L) return;const lo=levels[0],hi=levels[L-1];
+  const r0=rect?rect[0]:0,r1=rect?rect[1]:N2-1,c0=rect?rect[2]:0,c1=rect?rect[3]:M-1;
+  for(let r=r0;r<r1;r++){let k=r*M+c0,a0=E[k],d0=E[k+M];
+    for(let c=c0;c<c1;c++,k++){const ea=a0,eb=E[k+1],ed=d0,ee=E[k+M+1];a0=eb;d0=ee;
+      if(ea!==ea||eb!==eb||ed!==ed||ee!==ee) continue;
+      let mn=ea,mx=ea;if(eb<mn)mn=eb;if(eb>mx)mx=eb;if(ed<mn)mn=ed;if(ed>mx)mx=ed;if(ee<mn)mn=ee;if(ee>mx)mx=ee;
+      if(mx<lo||mn>hi) continue;
+      let i0=0,i1=L;while(i0<i1){const m=(i0+i1)>>1;if(levels[m]<mn) i0=m+1;else i1=m;}   // first level >= mn
+      for(let li=i0;li<L;li++){const t=levels[li];if(t>mx) break;if(t===mn&&t===mx) continue;
+        const A=ea>=t,B=eb>=t,D=ed>=t,F=ee>=t;const code=(A?8:0)|(B?4:0)|(F?2:0)|(D?1:0);if(code===0||code===15) continue;
+        const Tx=c+(t-ea)/(eb-ea),Rz=r+(t-eb)/(ee-eb),Bx=c+(t-ed)/(ee-ed),Lz=r+(t-ea)/(ed-ea);
+        switch(code){
+          case 1:case 14:seg(li,c,Lz,Bx,r+1);break; case 2:case 13:seg(li,Bx,r+1,c+1,Rz);break;
+          case 3:case 12:seg(li,c,Lz,c+1,Rz);break; case 4:case 11:seg(li,Tx,r,c+1,Rz);break;
+          case 6:case 9:seg(li,Tx,r,Bx,r+1);break; case 7:case 8:seg(li,c,Lz,Tx,r);break;
+          case 5:seg(li,c,Lz,Tx,r);seg(li,Bx,r+1,c+1,Rz);break; case 10:seg(li,Tx,r,c+1,Rz);seg(li,c,Lz,Bx,r+1);break;}}}}
 }
 const WAVE=[2.4,3.3,4.4,5.8,7.6,9.9,12.8,16.5];   // water lines: spacing grows by about a quarter each line
 // draws water lines, coast, isobaths, contours and lake shores of grid E onto ctx; toX/toY map grid coordinates to the ctx
-function drawLines(ctx,E,M,N2,landStep,toX,toY,lw,LK,waves){
-  const iso=(A,t,color,w)=>{ctx.strokeStyle=color;ctx.lineWidth=w*lw;ctx.lineJoin="round";ctx.lineCap="round";ctx.beginPath();
-    isoSegs(A,M,N2,t,(x1,y1,x2,y2)=>{ctx.moveTo(toX(x1+.5),toY(y1+.5));ctx.lineTo(toX(x2+.5),toY(y2+.5));});ctx.stroke();};
+function drawLines(ctx,E,M,N2,landStep,toX,toY,lw,LK,waves,rect){   // rect: [r0,r1,c0,c1] of the cells that matter (the rest is skirt)
+  // several levels of one grid at once: one pass over the cells, one path per level, stroked afterwards; style(level) gives [[colour,width],...]
+  const many=(A,levels,style)=>{const paths=levels.map(()=>new Path2D());
+    isoMany(A,M,N2,levels,(li,x1,y1,x2,y2)=>{const P=paths[li];P.moveTo(toX(x1+.5),toY(y1+.5));P.lineTo(toX(x2+.5),toY(y2+.5));},rect);
+    ctx.lineJoin="round";ctx.lineCap="round";levels.forEach((t,li)=>{for(const st of style(t,li)){ctx.strokeStyle=st[0];ctx.lineWidth=st[1]*lw;ctx.stroke(paths[li]);}});};
   if(layers.lWave&&waves){const D=edt(E,M,N2,k=>E[k]>=0||(LK&&LK[k]>E[k]));
-    WAVE.forEach((w,i)=>iso(D,w*waves,"rgba(63,107,122,"+(.5-.055*i).toFixed(3)+")",.7));}
-  let mx=-1e9;for(let k=0;k<E.length;k++) if(E[k]>mx) mx=E[k];
-  if(layers.lIso) for(const z of ISO) iso(E,z,"rgba(63,95,108,.5)",.8);
-  if(layers.lContour) for(let z=landStep;z<=mx;z+=landStep) iso(E,z,z%(landStep*5)===0?"rgba(61,43,28,.55)":"rgba(61,43,28,.32)",z%(landStep*5)===0?1:.7);
-  iso(E,0,"rgba(239,229,207,.7)",3.2);     // paper halo along the shore, like an engraved chart
-  iso(E,0,"#3d2b1c",1.4);
-  if(LK){const LD=new Float32Array(E.length);for(let k=0;k<E.length;k++) LD[k]=LK[k]===LK[k]?LK[k]-E[k]:-1;iso(LD,0,"rgba(61,43,28,.8)",1);}
+    many(D,WAVE.map(w=>w*waves),(t,i)=>[["rgba(63,107,122,"+(.5-.055*i).toFixed(3)+")",.7]]);}
+  let mx=-1e9,mn=1e9;for(let k=0;k<E.length;k++){const e=E[k];if(e>mx) mx=e;if(e<mn) mn=e;}
+  const lv=[];if(layers.lIso) for(let q=ISO.length-1;q>=0;q--) if(ISO[q]>mn) lv.push(ISO[q]);
+  lv.push(0);if(layers.lContour) for(let z=landStep;z<=mx;z+=landStep) lv.push(z);
+  const SEA=[["rgba(63,95,108,.5)",.8]],COAST=[["rgba(239,229,207,.7)",3.2],["#3d2b1c",1.4]],MAJOR=[["rgba(61,43,28,.55)",1]],MINOR=[["rgba(61,43,28,.32)",.7]];   // the coast: a paper halo, then the line, like an engraved chart
+  many(E,lv,z=>z<0?SEA:z===0?COAST:z%(landStep*5)===0?MAJOR:MINOR);
+  if(LK){const LD=new Float32Array(E.length);for(let k=0;k<E.length;k++) LD[k]=LK[k]===LK[k]?LK[k]-E[k]:-1;many(LD,[0],()=>[["rgba(61,43,28,.8)",1]]);}
 }
 // rivers as smoothed, tapered strokes; toS maps world metres to ctx pixels, pxPerM scales the width
 function heightInTile(E,TT,ii,jj,X,Y){
@@ -392,6 +407,10 @@ function drawRivers(ctx,x0,y0,x1,y1,toS,pxPerM,zEff,hAt){
       else prev=[sx,sy,sx,sy];prevW=w;}
     if(prev){ctx.lineWidth=prevW;ctx.beginPath();ctx.moveTo(prev[2],prev[3]);ctx.lineTo(prev[0],prev[1]);ctx.stroke();}}}
 }
+// painting is spread over frames: about 24 ms per frame, the rest shows a parent until the next frame
+let paintUntil=0,paintedNow=0,paintMore=false;
+function paintFor(rec){if(rec.img) return rec.img;if(paintedNow>0&&performance.now()>paintUntil){paintMore=true;return null;}paintedNow++;rec.img=paintTile(rec);return rec.img;}
+function paintedAncestor(z,i,j,maxUp){for(let k=1;k<=maxUp&&z-k>=0;k++){const f=1<<k,a=store.get((z-k)+"/"+Math.floor(i/f)+"/"+Math.floor(j/f));if(a&&a.img) return a;}return null;}
 function paintTile(rec){
   const N=S.N,SK=S.SK,M=N+2*SK,T=tileSize(rec.z),sp=T/N,cv=document.createElement("canvas");cv.width=cv.height=N;
   const c=cv.getContext("2d"),img=c.createImageData(N,N);
@@ -401,7 +420,7 @@ function paintTile(rec){
   const toS=(X,Y)=>[(X-rec.i*T)/sp,((rec.j+1)*T-Y)/sp];
   drawRivers(c,rec.i*T-T*.05,rec.j*T-T*.05,(rec.i+1)*T+T*.05,(rec.j+1)*T+T*.05,toS,1/sp,rec.z,(X,Y)=>heightInTile(rec.E,T,rec.i,rec.j,X,Y));
   if(HY&&layers.lRiver){const oc=coverWater(c,img,rec.E,M,M,SK,LK?(r,cc)=>LK[r*M+cc]:null);if(oc) c.drawImage(oc,0,0);}
-  drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-SK,y=>y-SK,1,LK,1);
+  drawLines(c,rec.E,M,M,landStepFor(rec.z),x=>x-SK,y=>y-SK,1,LK,1,[SK-1,SK+N+1,SK-1,SK+N+1]);
   return cv;
 }
 
@@ -414,11 +433,12 @@ function drawPlane(ctx,W,H){
     const rec=tileGet(z,i,j,10-Math.abs(i-(i0+i1)/2)-Math.abs(j-(j0+j1)/2));
     const sx=W/2+(i*T-view.x)/m,sy=H/2-((j+1)*T-view.y)/m;
     const X0=Math.round(sx),Y0=Math.round(sy),X1=Math.round(sx+px),Y1=Math.round(sy+px);
-    if(rec.E){if(!rec.img) rec.img=paintTile(rec);ctx.drawImage(rec.img,X0,Y0,X1-X0,Y1-Y0);shown++;continue;}
-    missing++;let done=false;
+    if(rec.E){const im=paintFor(rec);if(im){ctx.drawImage(im,X0,Y0,X1-X0,Y1-Y0);shown++;continue;}}
+    else missing++;
+    let done=false;
     for(let k=1;k<=5&&z-k>=0;k++){const f=1<<k,ia=Math.floor(i/f),ja=Math.floor(j/f),a=store.get((z-k)+"/"+ia+"/"+ja);
-      if(a&&a.E){a.last=++tick;if(!a.img) a.img=paintTile(a);const n=S.N/f,sxs=(i-ia*f)*n,sys=(f-1-(j-ja*f))*n;
-        ctx.drawImage(a.img,sxs,sys,n,n,X0,Y0,X1-X0,Y1-Y0);done=true;break;}}
+      if(a&&a.E){a.last=++tick;const im=a.img||paintFor(a);if(!im) continue;const n=S.N/f,sxs=(i-ia*f)*n,sys=(f-1-(j-ja*f))*n;
+        ctx.drawImage(im,sxs,sys,n,n,X0,Y0,X1-X0,Y1-Y0);done=true;break;}}
     if(!done){ctx.fillStyle="#e6d8bb";ctx.fillRect(X0,Y0,X1-X0,Y1-Y0);}
   }
   // the levels above are kept warm so zooming out never shows blank paper
@@ -446,7 +466,7 @@ function peekHeight(X,Y,mLocal){   // like sampleHeight, but only from tiles alr
 const projC=document.createElement("canvas");
 function drawProjected(ctx,W,H,inv,fwd){
   // inv(sx,sy) -> [X,Y,metresPerPixel] or null outside the chart; computed on a half-resolution grid with a 1-cell skirt
-  const Q=2,Wg=Math.ceil(W/Q)+2,Hg=Math.ceil(H/Q)+2,M=Wg,E=new Float32Array(Wg*Hg),SPc=new Float32Array(Wg*Hg),LK=HY&&layers.lRiver?new Float32Array(Wg*Hg):null;
+  const Q=quick?4:2,Wg=Math.ceil(W/Q)+2,Hg=Math.ceil(H/Q)+2,M=Wg,E=new Float32Array(Wg*Hg),SPc=new Float32Array(Wg*Hg),LK=HY&&layers.lRiver?new Float32Array(Wg*Hg):null;
   let missing=0;
   for(let r=0;r<Hg;r++)for(let c=0;c<Wg;c++){const p=inv((c-.5)*Q,(r-.5)*Q),k=r*Wg+c;
     if(!p){E[k]=NaN;SPc[k]=1;if(LK) LK[k]=NaN;continue;}
@@ -458,11 +478,12 @@ function drawProjected(ctx,W,H,inv,fwd){
   const mLoc=[];for(let r=0;r<Hg;r+=8)for(let c=0;c<Wg;c+=8){const p=inv((c-.5)*Q,(r-.5)*Q);if(p) mLoc.push(p[2]);}
   mLoc.sort((a,b)=>a-b);const mm=mLoc.length?mLoc[Math.floor(mLoc.length*.3)]:1e4;
   const zEff=clamp(Math.round(Math.log2(32768/mm)),0,S.finest);
-  if(HY){const c0=inv(0,0),c1=inv(W,H),c2=inv(0,H),c3=inv(W,0),xs=[c0,c1,c2,c3].filter(Boolean);
+  if(HY&&!quick){const c0=inv(0,0),c1=inv(W,H),c2=inv(0,H),c3=inv(W,0),xs=[c0,c1,c2,c3].filter(Boolean);
     const big=xs.length<4||view.mode==="disc";const x0=big?-1e9:Math.min(...xs.map(p=>p[0])),x1=big?1e9:Math.max(...xs.map(p=>p[0])),y0=big?-1e9:Math.min(...xs.map(p=>p[1])),y1=big?1e9:Math.max(...xs.map(p=>p[1]));
     drawRivers(ctx,x0,y0,x1,y1,(X,Y)=>fwd(X,Y)||[-1e4,-1e4],1/mm,zEff,(X,Y)=>sampleHeight(X,Y,mm));
     const oc=coverWater(pc,img,E,M,Hg,1,LK?(r,c)=>LK[r*Wg+c]:null);if(oc) ctx.drawImage(oc,0,0,W,H);}
-  drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1,LK,null);
+  if(quick){const kc=layers.lContour,kw=layers.lWave,ki=layers.lIso;layers.lContour=layers.lWave=layers.lIso=false;drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1,LK,null);layers.lContour=kc;layers.lWave=kw;layers.lIso=ki;}   // while moving: the coast only
+  else drawLines(ctx,E,M,Hg,landStepFor(zEff),x=>(x-1)*Q,y=>(y-1)*Q,1,LK,null);
   return {z:zEff,shown:0,missing};
 }
 function discParams(W,H){return {cx:W/2,cy:H/2,Rm:Math.min(W,H)/2-26,R0:S.litR};}
@@ -586,12 +607,12 @@ function draw3d(W,H,dpr){
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,glIdx);gl.enableVertexAttribArray(glLoc.aPos);
   let shown=0,missing=0;
   leaves.sort((p,q)=>p[3]-q[3]);
-  for(const [z,i,j,d] of leaves){const rec=tileGet(z,i,j,10-Math.min(9,d/c.D));const src=bestSource(rec);
+  for(const [z,i,j,d] of leaves){const rec=tileGet(z,i,j,10-Math.min(9,d/c.D));let src=bestSource(rec);
     if(!rec.E&&z>=2) tileGet(z-2,Math.floor(i/4),Math.floor(j/4),12);   // a coarse stand-in first, so the ground shows while the fine tile is made
     if(!src){missing++;continue;}
     if(!rec.E) missing++;else shown++;
     if(!rec.vbo||rec.meshSrc!==src.key){const v=meshFor(rec,src);if(!rec.vbo) rec.vbo=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,rec.vbo);gl.bufferData(gl.ARRAY_BUFFER,v,gl.STATIC_DRAW);rec.meshSrc=src.key;}
-    if(!src.img) src.img=paintTile(src);
+    if(!src.img&&!paintFor(src)){const a=paintedAncestor(src.z,src.i,src.j,6);if(!a){missing++;continue;}src=a;}   // the picture waits for a later frame; a parent's for now
     if(!src.tex||src.texSrc!==src.img){if(!src.tex) src.tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,src.tex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src.img);
       gl.generateMipmap(gl.TEXTURE_2D);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);src.texSrc=src.img;}
@@ -656,13 +677,13 @@ function drawLabels(ctx,W,H){
 }
 
 /* ---------- render loop ---------- */
-let renderTimer=0,stats={z:0,shown:0,missing:0,ms:0};
+let renderTimer=0,stats={z:0,shown:0,missing:0,ms:0},quick=false,quickUntil=0;   // quick: a coarser frame while the view is moving
 function schedule(){if(renderTimer) return;renderTimer=setTimeout(()=>{renderTimer=0;render();},40);}
 function render(){
   const dpr=Math.min(devicePixelRatio||1,2),W=box.clientWidth,H=box.clientHeight;
   if(mapC.width!==Math.round(W*dpr)||mapC.height!==Math.round(H*dpr)){mapC.width=Math.round(W*dpr);mapC.height=Math.round(H*dpr);}
   const ctx=mapC.getContext("2d");ctx.setTransform(dpr,0,0,dpr,0,0);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
-  const t0=performance.now();labelBoxes=[];
+  const t0=performance.now();labelBoxes=[];paintUntil=t0+40;paintedNow=0;paintMore=false;quick=!!drag||!!pinch||t0<quickUntil;
   if(view.mode==="3d"){ctx.clearRect(0,0,W,H);stats=draw3d(W,H,dpr);}
   else{ctx.fillStyle="#efe5cf";ctx.fillRect(0,0,W,H);}
   if(view.mode==="3d");
@@ -671,6 +692,7 @@ function render(){
   else stats=drawProjected(ctx,W,H,logInv(W,H),(X,Y)=>logFwd(W,H,X,Y));
   stats.ms=performance.now()-t0;
   drawOverlay(ctx,W,H);drawLabels(ctx,W,H);trimStore();updateHud();if(view.mode==="3d") sync3dCtl();
+  if(paintMore||(quick&&!drag&&!pinch)) schedule();   // the rest of the pictures, or the full-quality frame after a quick one
 }
 
 /* ---------- readout: where the cursor is, in every coordinate system of the design ---------- */
@@ -717,7 +739,7 @@ box.addEventListener("pointermove",ev=>{const r=box.getBoundingClientRect();curs
     else if(view.mode==="log"){const ppr=logPPR(box.clientWidth);view.lu-=dx/ppr;view.lv+=dy/ppr;}
     schedule();}
   else updateHud();});
-const endDrag=()=>{drag=null;box.classList.remove("drag");saveView();};
+const endDrag=()=>{drag=null;box.classList.remove("drag");saveView();schedule();};
 box.addEventListener("pointerup",endDrag);box.addEventListener("pointercancel",endDrag);
 box.addEventListener("wheel",ev=>{ev.preventDefault();const r=box.getBoundingClientRect(),sx=ev.clientX-r.left,sy=ev.clientY-r.top,f=Math.exp(-ev.deltaY*.0015);
   if(view.mode==="plane"){const m=mpp(),X=view.x+(sx-r.width/2)*m,Y=view.y-(sy-r.height/2)*m;
@@ -726,7 +748,7 @@ box.addEventListener("wheel",ev=>{ev.preventDefault();const r=box.getBoundingCli
     const p=g&&cam3d(r.width,r.height).ground(sx,sy);if(g&&p){view.x+=g[0]-p[0];view.y+=g[1]-p[1];}}
   else if(view.mode==="log"){const p0=logPPR(r.width);view.lz=clamp(view.lz+Math.log2(f),-1,8);const p1=logPPR(r.width);
     view.lu+=(sx-r.width/2)*(1/p0-1/p1);view.lv-=(sy-r.height/2)*(1/p0-1/p1);}
-  schedule();saveView();},{passive:false});
+  if(view.mode!=="plane"&&view.mode!=="3d") quickUntil=performance.now()+160;schedule();saveView();},{passive:false});
 let pinch=null;
 const fingers=ev=>{const a=ev.touches[0],b=ev.touches[1];return {d:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),ang:Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX),my:(a.clientY+b.clientY)/2};};
 box.addEventListener("touchstart",ev=>{if(ev.touches.length===2){pinch=fingers(ev);drag=null;}},{passive:true});
